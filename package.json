@@ -1,0 +1,30 @@
+{
+  "name": "agent-responses-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "node --watch server/index.js",
+    "dev:web": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "type-check": "vue-tsc --build --force"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^6.0.7",
+    "concurrently": "^9.2.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "pg": "^8.16.3",
+    "vite": "^7.3.3",
+    "vue": "^3.5.13",
+    "vue-tsc": "^2.2.10"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

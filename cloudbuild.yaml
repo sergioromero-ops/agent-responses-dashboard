@@ -1,0 +1,32 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --allow-unauthenticated
+      - --set-env-vars
+      - PGSSL=true
+substitutions:
+  _REGION: us-east1
+  _REPOSITORY: pigui-services
+  _SERVICE_NAME: agent-responses-dashboard
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA
