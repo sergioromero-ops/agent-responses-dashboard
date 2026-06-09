@@ -38,7 +38,12 @@ const emptySummary = () => ({
   answers: 0,
   avgAnswersPerSession: 0,
   recommendationEvents: 0,
-  acceptedRecommendations: 0
+  acceptedRecommendations: 0,
+  webUsers: 0,
+  mobileUsers: 0,
+  b2bUsers: 0,
+  b2cUsers: 0,
+  b2oUsers: 0
 });
 
 const requireDb = (res) => {
@@ -76,15 +81,63 @@ app.get("/api/summary", async (req, res, next) => {
     if (await tableExists("business.onboarding_voice_sessions")) {
       const result = await pool.query(
         `
+          with active_users as (
+            select distinct user_id
+            from business.onboarding_voice_sessions
+            where is_active = true
+              and created_at >= now() - ($1::int * interval '1 day')
+          ),
+          user_flags as (
+            select
+              au.user_id,
+              exists(
+                select 1 from business.business_profile bp
+                where bp.user_id = au.user_id and bp.is_active = true
+              ) as has_b2b,
+              exists(
+                select 1 from customer.customer_profile cp
+                where cp.user_id = au.user_id and cp.is_active = true
+              ) or exists(
+                select 1 from customer.shopping_cart sc
+                where sc.user_id = au.user_id
+                  and sc.is_active = true
+                  and (sc.source_type::text = 'B2C' or sc.source_product::text = 'B2C')
+              ) as has_b2c,
+              exists(
+                select 1 from customer.shopping_cart sc
+                where sc.user_id = au.user_id
+                  and sc.is_active = true
+                  and (sc.source_type::text = 'B2O' or sc.source_product::text = 'B2O')
+              ) as has_b2o,
+              exists(
+                select 1 from common.user_devices ud
+                where ud.user_id = au.user_id and ud.is_active = true and ud.device_type::text = 'web'
+              ) as has_web,
+              exists(
+                select 1 from common.user_devices ud
+                where ud.user_id = au.user_id and ud.is_active = true and ud.device_type::text in ('ios', 'android')
+              ) as has_mobile
+            from active_users au
+          ),
+          session_metrics as (
+            select
+              count(distinct user_id)::int as users,
+              count(*)::int as sessions,
+              count(*) filter (where status = 'completed')::int as completed_sessions,
+              coalesce(sum(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::int as answers,
+              coalesce(avg(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::float as avg_answers_per_session
+            from business.onboarding_voice_sessions
+            where is_active = true
+              and created_at >= now() - ($1::int * interval '1 day')
+          )
           select
-            count(distinct user_id)::int as users,
-            count(*)::int as sessions,
-            count(*) filter (where status = 'completed')::int as completed_sessions,
-            coalesce(sum(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::int as answers,
-            coalesce(avg(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::float as avg_answers_per_session
-          from business.onboarding_voice_sessions
-          where is_active = true
-            and created_at >= now() - ($1::int * interval '1 day')
+            sm.*,
+            (select count(*)::int from user_flags where has_web) as web_users,
+            (select count(*)::int from user_flags where has_mobile) as mobile_users,
+            (select count(*)::int from user_flags where has_b2b) as b2b_users,
+            (select count(*)::int from user_flags where has_b2c) as b2c_users,
+            (select count(*)::int from user_flags where has_b2o) as b2o_users
+          from session_metrics sm
         `,
         [days]
       );
@@ -93,7 +146,12 @@ app.get("/api/summary", async (req, res, next) => {
         sessions: result.rows[0].sessions,
         completedSessions: result.rows[0].completed_sessions,
         answers: result.rows[0].answers,
-        avgAnswersPerSession: Number(result.rows[0].avg_answers_per_session || 0)
+        avgAnswersPerSession: Number(result.rows[0].avg_answers_per_session || 0),
+        webUsers: result.rows[0].web_users,
+        mobileUsers: result.rows[0].mobile_users,
+        b2bUsers: result.rows[0].b2b_users,
+        b2cUsers: result.rows[0].b2c_users,
+        b2oUsers: result.rows[0].b2o_users
       });
     }
 
@@ -132,19 +190,112 @@ app.get("/api/users", async (req, res, next) => {
 
     const result = await pool.query(
       `
+        with session_metrics as (
+          select
+            user_id,
+            count(*)::int as sessions,
+            count(distinct branch_id)::int as branches,
+            count(*) filter (where status = 'completed')::int as completed_sessions,
+            coalesce(sum(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::int as answers,
+            coalesce(avg(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::float as avg_answers_per_session,
+            max(updated_at) as last_activity_at
+          from business.onboarding_voice_sessions
+          where is_active = true
+            and created_at >= now() - ($1::int * interval '1 day')
+          group by user_id
+        ),
+        profile as (
+          select
+            sm.user_id,
+            u.email,
+            u.phone,
+            nullif(
+              trim(concat_ws(' ',
+                coalesce(bp.first_name, cp.first_name),
+                coalesce(bp.last_name, cp.last_name),
+                coalesce(bp.second_last_name, cp.second_last_name)
+              )),
+              ''
+            ) as display_name,
+            exists(select 1 from business.business_profile x where x.user_id = sm.user_id and x.is_active = true) as has_b2b,
+            exists(select 1 from customer.customer_profile x where x.user_id = sm.user_id and x.is_active = true) as has_b2c_profile,
+            exists(
+              select 1 from customer.shopping_cart sc
+              where sc.user_id = sm.user_id and sc.is_active = true
+                and (sc.source_type::text = 'B2C' or sc.source_product::text = 'B2C')
+            ) as has_b2c_source,
+            exists(
+              select 1 from customer.shopping_cart sc
+              where sc.user_id = sm.user_id and sc.is_active = true
+                and (sc.source_type::text = 'B2O' or sc.source_product::text = 'B2O')
+            ) as has_b2o
+          from session_metrics sm
+          left join common."user" u on u.id = sm.user_id
+          left join business.business_profile bp on bp.user_id = sm.user_id and bp.is_active = true
+          left join customer.customer_profile cp on cp.user_id = sm.user_id and cp.is_active = true
+        ),
+        latest_device as (
+          select distinct on (ud.user_id)
+            ud.user_id,
+            ud.device_type::text as device_type,
+            ud.device_name,
+            ud.last_activity
+          from common.user_devices ud
+          join session_metrics sm on sm.user_id = ud.user_id
+          where ud.is_active = true
+          order by ud.user_id, ud.last_activity desc nulls last, ud.updated_at desc
+        ),
+        source_counts as (
+          select
+            sc.user_id,
+            count(*) filter (where sc.source_type::text = 'B2C' or sc.source_product::text = 'B2C')::int as b2c_events,
+            count(*) filter (where sc.source_type::text = 'B2O' or sc.source_product::text = 'B2O')::int as b2o_events
+          from customer.shopping_cart sc
+          join session_metrics sm on sm.user_id = sc.user_id
+          where sc.is_active = true
+          group by sc.user_id
+        )
         select
-          user_id::text as user_id,
-          count(*)::int as sessions,
-          count(distinct branch_id)::int as branches,
-          count(*) filter (where status = 'completed')::int as completed_sessions,
-          coalesce(sum(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::int as answers,
-          coalesce(avg(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::float as avg_answers_per_session,
-          max(updated_at) as last_activity_at
-        from business.onboarding_voice_sessions
-        where is_active = true
-          and created_at >= now() - ($1::int * interval '1 day')
-          and ($2::text = '' or user_id::text ilike '%' || $2::text || '%')
-        group by user_id
+          sm.user_id::text as user_id,
+          sm.sessions,
+          sm.branches,
+          sm.completed_sessions,
+          sm.answers,
+          sm.avg_answers_per_session,
+          sm.last_activity_at,
+          profile.email,
+          profile.phone,
+          profile.display_name,
+          coalesce(ld.device_type, 'unknown') as device_type,
+          ld.device_name,
+          case
+            when ld.device_type = 'web' then 'Web'
+            when ld.device_type in ('ios', 'android') then 'Movil'
+            else 'Sin dispositivo'
+          end as channel,
+          case
+            when profile.has_b2b and profile.has_b2o and (profile.has_b2c_profile or profile.has_b2c_source) then 'B2B + B2O + B2C'
+            when profile.has_b2b and profile.has_b2o then 'B2B + B2O'
+            when profile.has_b2b and (profile.has_b2c_profile or profile.has_b2c_source) then 'B2B + B2C'
+            when profile.has_b2o and (profile.has_b2c_profile or profile.has_b2c_source) then 'B2O + B2C'
+            when profile.has_b2b then 'B2B'
+            when profile.has_b2o then 'B2O'
+            when profile.has_b2c_profile or profile.has_b2c_source then 'B2C'
+            else 'Sin segmento'
+          end as segment,
+          profile.has_b2b,
+          (profile.has_b2c_profile or profile.has_b2c_source) as has_b2c,
+          profile.has_b2o,
+          coalesce(source_counts.b2c_events, 0) as b2c_events,
+          coalesce(source_counts.b2o_events, 0) as b2o_events
+        from session_metrics sm
+        join profile on profile.user_id = sm.user_id
+        left join latest_device ld on ld.user_id = sm.user_id
+        left join source_counts on source_counts.user_id = sm.user_id
+        where $2::text = ''
+          or sm.user_id::text ilike '%' || $2::text || '%'
+          or coalesce(profile.email, '') ilike '%' || $2::text || '%'
+          or coalesce(profile.display_name, '') ilike '%' || $2::text || '%'
         order by last_activity_at desc
         limit 100
       `,
@@ -158,7 +309,19 @@ app.get("/api/users", async (req, res, next) => {
       completedSessions: row.completed_sessions,
       answers: row.answers,
       avgAnswersPerSession: Number(row.avg_answers_per_session || 0),
-      lastActivityAt: row.last_activity_at
+      lastActivityAt: row.last_activity_at,
+      displayName: row.display_name,
+      email: row.email,
+      phone: row.phone,
+      channel: row.channel,
+      deviceType: row.device_type,
+      deviceName: row.device_name,
+      segment: row.segment,
+      hasB2b: row.has_b2b,
+      hasB2c: row.has_b2c,
+      hasB2o: row.has_b2o,
+      b2cEvents: row.b2c_events,
+      b2oEvents: row.b2o_events
     })));
   } catch (error) {
     next(error);
@@ -176,7 +339,76 @@ app.get("/api/users/:userId", async (req, res, next) => {
       return;
     }
 
-    const [sessions, blockMetrics, answers] = await Promise.all([
+    const [profile, sessions, sourceMetrics, deviceMetrics, answerSourceMetrics, blockMetrics, answers] = await Promise.all([
+      pool.query(
+        `
+          with profile_flags as (
+            select
+              CAST($1 AS uuid) as user_id,
+              exists(select 1 from business.business_profile bp where bp.user_id::text = $1::text and bp.is_active = true) as has_b2b,
+              exists(select 1 from customer.customer_profile cp where cp.user_id::text = $1::text and cp.is_active = true) as has_b2c_profile,
+              exists(
+                select 1 from customer.shopping_cart sc
+                where sc.user_id::text = $1::text and sc.is_active = true
+                  and (sc.source_type::text = 'B2C' or sc.source_product::text = 'B2C')
+              ) as has_b2c_source,
+              exists(
+                select 1 from customer.shopping_cart sc
+                where sc.user_id::text = $1::text and sc.is_active = true
+                  and (sc.source_type::text = 'B2O' or sc.source_product::text = 'B2O')
+              ) as has_b2o
+          ),
+          latest_device as (
+            select
+              ud.device_type::text as device_type,
+              ud.device_name,
+              ud.last_activity
+            from common.user_devices ud
+            where ud.user_id::text = $1::text and ud.is_active = true
+            order by ud.last_activity desc nulls last, ud.updated_at desc
+            limit 1
+          )
+          select
+            u.id::text as user_id,
+            u.email,
+            u.phone,
+            nullif(
+              trim(concat_ws(' ',
+                coalesce(bp.first_name, cp.first_name),
+                coalesce(bp.last_name, cp.last_name),
+                coalesce(bp.second_last_name, cp.second_last_name)
+              )),
+              ''
+            ) as display_name,
+            coalesce(ld.device_type, 'unknown') as device_type,
+            ld.device_name,
+            ld.last_activity as device_last_activity,
+            case
+              when ld.device_type = 'web' then 'Web'
+              when ld.device_type in ('ios', 'android') then 'Movil'
+              else 'Sin dispositivo'
+            end as channel,
+            case
+              when pf.has_b2b and pf.has_b2o and (pf.has_b2c_profile or pf.has_b2c_source) then 'B2B + B2O + B2C'
+              when pf.has_b2b and pf.has_b2o then 'B2B + B2O'
+              when pf.has_b2b and (pf.has_b2c_profile or pf.has_b2c_source) then 'B2B + B2C'
+              when pf.has_b2o and (pf.has_b2c_profile or pf.has_b2c_source) then 'B2O + B2C'
+              when pf.has_b2b then 'B2B'
+              when pf.has_b2o then 'B2O'
+              when pf.has_b2c_profile or pf.has_b2c_source then 'B2C'
+              else 'Sin segmento'
+            end as segment,
+            pf.has_b2b,
+            (pf.has_b2c_profile or pf.has_b2c_source) as has_b2c,
+            pf.has_b2o
+          from profile_flags pf
+          left join common."user" u on u.id = pf.user_id
+          left join business.business_profile bp on bp.user_id = pf.user_id and bp.is_active = true
+          left join customer.customer_profile cp on cp.user_id = pf.user_id and cp.is_active = true
+          left join latest_device ld on true
+        `,
+        [userId]
+      ),
       pool.query(
         `
           select
@@ -192,6 +424,42 @@ app.get("/api/users/:userId", async (req, res, next) => {
           where is_active = true and user_id::text = $1
           order by updated_at desc
           limit 50
+        `,
+        [userId]
+      ),
+      pool.query(
+        `
+          select source, count(*)::int as total
+          from (
+            select coalesce(sc.source_type::text, sc.source_product::text, 'Sin segmento') as source
+            from customer.shopping_cart sc
+            where sc.user_id::text = $1 and sc.is_active = true
+          ) data
+          group by source
+          order by total desc
+        `,
+        [userId]
+      ),
+      pool.query(
+        `
+          select device_type::text as device_type, count(*)::int as total
+          from common.user_devices
+          where user_id::text = $1 and is_active = true
+          group by device_type
+          order by total desc
+        `,
+        [userId]
+      ),
+      pool.query(
+        `
+          select
+            coalesce(answer_item->>'answer_source', 'sin_fuente') as source,
+            count(*)::int as total
+          from business.onboarding_voice_sessions s
+          cross join lateral jsonb_array_elements(coalesce(s.answers, '[]'::jsonb)) answer_item
+          where s.is_active = true and s.user_id::text = $1
+          group by source
+          order by total desc
         `,
         [userId]
       ),
@@ -231,6 +499,20 @@ app.get("/api/users/:userId", async (req, res, next) => {
     ]);
 
     res.json({
+      profile: profile.rows[0] ? {
+        userId: profile.rows[0].user_id,
+        displayName: profile.rows[0].display_name,
+        email: profile.rows[0].email,
+        phone: profile.rows[0].phone,
+        channel: profile.rows[0].channel,
+        deviceType: profile.rows[0].device_type,
+        deviceName: profile.rows[0].device_name,
+        deviceLastActivity: profile.rows[0].device_last_activity,
+        segment: profile.rows[0].segment,
+        hasB2b: profile.rows[0].has_b2b,
+        hasB2c: profile.rows[0].has_b2c,
+        hasB2o: profile.rows[0].has_b2o
+      } : null,
       sessions: sessions.rows.map((row) => ({
         id: row.id,
         branchId: row.branch_id,
@@ -242,6 +524,9 @@ app.get("/api/users/:userId", async (req, res, next) => {
         completedAt: row.completed_at
       })),
       blockMetrics: blockMetrics.rows.map((row) => ({ block: row.block, answers: row.answers })),
+      sourceMetrics: sourceMetrics.rows.map((row) => ({ source: row.source, total: row.total })),
+      deviceMetrics: deviceMetrics.rows.map((row) => ({ deviceType: row.device_type, total: row.total })),
+      answerSourceMetrics: answerSourceMetrics.rows.map((row) => ({ source: row.source, total: row.total })),
       answers: answers.rows.map((row) => ({
         sessionId: row.session_id,
         branchId: row.branch_id,
