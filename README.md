@@ -38,7 +38,7 @@ Deploy manual:
 ```bash
 gcloud run deploy agent-responses-dashboard \
   --source . \
-  --region us-east1 \
+  --region europe-west1 \
   --allow-unauthenticated \
   --set-env-vars PGSSL=true \
   --set-secrets DATABASE_URL=DATABASE_URL:latest

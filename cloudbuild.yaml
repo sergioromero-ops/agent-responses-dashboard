@@ -24,8 +24,10 @@ steps:
       - --allow-unauthenticated
       - --set-env-vars
       - PGSSL=true
+      - --set-secrets
+      - DATABASE_URL=DATABASE_URL:latest
 substitutions:
-  _REGION: us-east1
+  _REGION: europe-west1
   _REPOSITORY: pigui-services
   _SERVICE_NAME: agent-responses-dashboard
 images:
