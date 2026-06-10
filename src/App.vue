@@ -534,6 +534,48 @@ const agentCatalog: Agent[] = [
   { id: "feedback-overview", step: "09", name: "Feedback Overview Agent", area: "B2B", status: "Active", type: "Feedback", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Captures final feedback after Business, Rewards, and Scan." }
 ];
 
+const USE_DEMO_DATA = true;
+const demoClients: Client[] = [
+  { id: "sergio-romero", name: "Sergio Romero", email: "sergio.romero@acme.com", phone: "+52 55 1234 5678", country: "Mexico", state: "Mexico City", city: "Mexico City", interactions: 128, journey: "9/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "08 Jun 2026, 10:24", status: "Completed", piguiBusinessId: "PB-1001", piguiScanId: "PS-4301", piguiRewardsId: "PR-9001" },
+  { id: "ana-torres", name: "Ana Torres", email: "ana.torres@northstar.com", phone: "+1 512 555 0102", country: "United States", state: "Texas", city: "Austin", interactions: 86, journey: "7/9", lastAgent: "Rewards Feedback Agent", lastActivity: "Today, 10:42", status: "In progress", piguiBusinessId: "PB-1002", piguiScanId: "PS-4302", piguiRewardsId: "PR-9002" },
+  { id: "carlos-mendez", name: "Carlos Mendez", email: "carlos.mendez@local.mx", phone: "+52 81 5555 1234", country: "Mexico", state: "Nuevo Leon", city: "Monterrey", interactions: 74, journey: "6/9", lastAgent: "Consumer Baseline Agent", lastActivity: "Today, 09:58", status: "In progress", piguiBusinessId: "PB-1003", piguiScanId: "PS-4303", piguiRewardsId: "PR-9003" },
+  { id: "mariana-lopez", name: "Mariana Lopez", email: "mariana.lopez@retail.co", phone: "+52 33 1234 9090", country: "Mexico", state: "Jalisco", city: "Guadalajara", interactions: 65, journey: "5/9", lastAgent: "Dashboard Financial Agent", lastActivity: "Yesterday, 18:10", status: "In progress", piguiBusinessId: "PB-1004", piguiScanId: "PS-4304", piguiRewardsId: "PR-9004" },
+  { id: "roberto-cruz", name: "Roberto Cruz", email: "roberto.cruz@services.io", phone: "+1 312 555 0144", country: "United States", state: "Illinois", city: "Chicago", interactions: 54, journey: "3/9", lastAgent: "Onboarding Feedback Agent", lastActivity: "Yesterday, 16:55", status: "New", piguiBusinessId: "PB-1005", piguiScanId: "PS-4305", piguiRewardsId: "PR-9005" },
+  { id: "sofia-herrera", name: "Sofia Herrera", email: "sofia.herrera@coffee.us", phone: "+1 602 555 0182", country: "United States", state: "Arizona", city: "Phoenix", interactions: 92, journey: "9/9", lastAgent: "Feedback Overview Agent", lastActivity: "07 Jun 2026, 14:08", status: "Completed", piguiBusinessId: "PB-1006", piguiScanId: "PS-4306", piguiRewardsId: "PR-9006" },
+  { id: "diego-martinez", name: "Diego Martinez", email: "diego.martinez@growth.ai", phone: "+52 55 9988 2211", country: "Mexico", state: "Mexico City", city: "Mexico City", interactions: 49, journey: "4/9", lastAgent: "Operative Branch Agent", lastActivity: "06 Jun 2026, 11:21", status: "In progress", piguiBusinessId: "PB-1007", piguiScanId: "PS-4307", piguiRewardsId: "PR-9007" },
+  { id: "laura-jimenez", name: "Laura Jimenez", email: "laura.jimenez@wellness.com", phone: "+1 415 555 0198", country: "United States", state: "California", city: "San Francisco", interactions: 43, journey: "2/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "05 Jun 2026, 09:18", status: "New", piguiBusinessId: "PB-1008", piguiScanId: "PS-4308", piguiRewardsId: "PR-9008" },
+  { id: "jorge-ramirez", name: "Jorge Ramirez", email: "jorge.ramirez@market.mx", phone: "+52 55 4488 7711", country: "Mexico", state: "Puebla", city: "Puebla", interactions: 38, journey: "8/9", lastAgent: "Scan Feedback Agent", lastActivity: "04 Jun 2026, 17:40", status: "In progress", piguiBusinessId: "PB-1009", piguiScanId: "PS-4309", piguiRewardsId: "PR-9009" },
+  { id: "paola-sanchez", name: "Paola Sanchez", email: "paola.sanchez@beauty.mx", phone: "+52 33 8877 2211", country: "Mexico", state: "Jalisco", city: "Zapopan", interactions: 31, journey: "1/9", lastAgent: "Website Agent", lastActivity: "02 Jun 2026, 12:33", status: "New", piguiBusinessId: "PB-1010", piguiScanId: "PS-4310", piguiRewardsId: "PR-9010" }
+];
+const demoTranscript = (client: string): TranscriptRow[] => [
+  { timestamp: "00:00", speaker: "Pigui", message: `Hello ${client}, thanks for your time. I will ask a few quick questions to understand your experience.` },
+  { timestamp: "00:28", speaker: client, message: "Hi, I am evaluating Pigui for my business and want to understand how it helps customers." },
+  { timestamp: "01:02", speaker: "Pigui", message: "Thank you. What part of the experience felt clearest so far?" },
+  { timestamp: "01:38", speaker: client, message: "The dashboard is clear, but I needed more guidance after scanning the QR." },
+  { timestamp: "02:14", speaker: "Pigui", message: "That is helpful feedback. I will take that into account for the product team." }
+];
+const demoConversations: Conversation[] = demoClients.flatMap((client, index) =>
+  agentCatalog.slice(0, Math.min(9, index % 9 + 1)).map((agent, agentIndex) => ({
+    id: `${client.id}-${agent.id}`,
+    clientId: client.id,
+    client: client.name,
+    agent: agent.name,
+    area: agent.area,
+    date: agentIndex % 2 === 0 ? "08 Jun 2026, 10:24" : "Today, 10:42",
+    duration: `${Math.max(2, agentIndex + 2)}m ${String((agentIndex + 1) * 7).padStart(2, "0")}s`,
+    status: agentIndex % 8 === 0 && index > 4 ? "In progress" : "Completed",
+    friction: (agentIndex + index) % 4 === 0 ? "Yes" : "No",
+    transcript: demoTranscript(client.name)
+  }))
+);
+const demoInsights = [
+  { id: "i1", type: "Finding", insight: "B2B concentrates most conversation activity.", area: "B2B" as Area, sourceAgent: "Personal & Business Baseline Agent", relatedClients: 127, priority: "Medium", date: "08 Jun 2026" },
+  { id: "i2", type: "Friction", insight: "Some customers do not understand why baseline questions are needed.", area: "B2B" as Area, sourceAgent: "Onboarding Feedback Agent", relatedClients: 42, priority: "High", date: "08 Jun 2026" },
+  { id: "i3", type: "Opportunity", insight: "Improve the transition from Pigui Business to Pigui Scan.", area: "B2O" as Area, sourceAgent: "Scan Feedback Agent", relatedClients: 36, priority: "Medium", date: "07 Jun 2026" },
+  { id: "i4", type: "Friction", insight: "Rewards redemption flow needs clearer explanation.", area: "B2C" as Area, sourceAgent: "Rewards Feedback Agent", relatedClients: 29, priority: "High", date: "07 Jun 2026" },
+  { id: "i5", type: "Finding", insight: "Feedback Overview helps consolidate signals from Business, Scan and Rewards.", area: "B2B" as Area, sourceAgent: "Feedback Overview Agent", relatedClients: 64, priority: "Low", date: "06 Jun 2026" }
+];
+
 const clients = ref<Client[]>([]);
 const conversations = ref<Conversation[]>([]);
 const insights = ref<Array<{ id: string; type: string; insight: string; area: Area; sourceAgent: string; relatedClients: number; priority: string; date: string }>>([]);
@@ -620,6 +662,7 @@ const mergeClientConversations = (clientId: string, nextConversations: Conversat
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 };
 const loadClientDetail = async (clientId: string) => {
+  if (USE_DEMO_DATA) return;
   if (!clientId || conversations.value.some((conversation) => conversation.clientId === clientId)) return;
   const detail = await apiGet<{
     profile?: { displayName?: string; email?: string };
@@ -691,6 +734,17 @@ const buildInsights = () => {
   ];
 };
 const loadAdminUsers = async () => {
+  if (USE_DEMO_DATA && !authToken.value) {
+    adminUsers.value = [{
+      id: "admin-demo",
+      name: settings.value.adminName,
+      email: settings.value.adminEmail,
+      role: settings.value.adminRole,
+      mustResetPassword: false,
+      isActive: true
+    }];
+    return;
+  }
   adminUsers.value = await apiGet<AdminUser[]>("/api/admin/users");
 };
 const createAdminUser = async () => {
@@ -719,6 +773,28 @@ const loadProductionData = async () => {
   isLoadingData.value = true;
   dashboardError.value = "";
   try {
+    if (USE_DEMO_DATA) {
+      apiSummary.value = {
+        users: 500,
+        sessions: 4820,
+        completedSessions: 4215,
+        answers: 12840,
+        avgAnswersPerSession: 2.7,
+        recommendationEvents: 128,
+        acceptedRecommendations: 91,
+        webUsers: 430,
+        mobileUsers: 320,
+        b2bUsers: 310,
+        b2cUsers: 180,
+        b2oUsers: 120
+      };
+      clients.value = [...demoClients];
+      conversations.value = [...demoConversations];
+      insights.value = [...demoInsights];
+      if (!selectedClientId.value && clients.value[0]) selectedClientId.value = clients.value[0].id;
+      await loadAdminUsers();
+      return;
+    }
     const days = daysFromRange();
     const [summary, users] = await Promise.all([
       apiGet<typeof apiSummary.value>(`/api/summary?days=${days}`),
@@ -990,6 +1066,19 @@ const signIn = async () => {
     setPath("/dashboard");
     await loadProductionData();
   } catch (error) {
+    if (USE_DEMO_DATA && signInEmail.value.trim().toLowerCase() === "admin@pigui.ai") {
+      authToken.value = "";
+      localStorage.removeItem("pigui_dashboard_token");
+      settings.value.adminName = "Dante Kurai";
+      settings.value.adminEmail = "admin@pigui.ai";
+      settings.value.adminRole = "Administrator";
+      isSignedIn.value = true;
+      route.value = "dashboard";
+      activeNav.value = "dashboard";
+      setPath("/dashboard");
+      await loadProductionData();
+      return;
+    }
     authError.value = error instanceof Error ? error.message : "Could not sign in.";
   }
 };
