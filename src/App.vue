@@ -1,389 +1,764 @@
 <template>
-  <main class="app-shell">
-    <header class="topbar">
-      <div class="window-controls" aria-hidden="true">
-        <span class="control control--close"></span>
-        <span class="control control--minimize"></span>
-        <span class="control control--zoom"></span>
+  <main v-if="!isSignedIn" class="signin-page">
+    <section class="signin-card">
+      <div class="signin-brand">Pigui AI</div>
+      <h1>Sign in</h1>
+      <label>
+        Email
+        <input v-model="signInEmail" type="email" autocomplete="email" />
+      </label>
+      <label>
+        Password
+        <input v-model="signInPassword" type="password" autocomplete="current-password" />
+      </label>
+      <button class="primary-action" type="button" @click="signIn">Sign in</button>
+      <button class="link-action" type="button">Forgot password?</button>
+      <div class="signin-footer">
+        <span>Internal use only</span>
+        <select v-model="settings.dashboardLanguage">
+          <option value="English">English</option>
+          <option value="Spanish">Spanish</option>
+        </select>
+      </div>
+    </section>
+  </main>
+
+  <main v-else class="app-frame">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <span class="brand-mark">P</span>
+        <div>
+          <strong>Pigui AI</strong>
+          <small>Agents Dashboard</small>
+        </div>
       </div>
 
-      <div class="title-block">
-        <p class="eyebrow">Pigui AI</p>
-        <h1>Respuestas de agentes</h1>
-        <p class="subtitle">Metricas por usuario desde la base de datos de conversaciones.</p>
-      </div>
+      <nav class="nav-list" aria-label="Main navigation">
+        <button
+          v-for="item in navItems"
+          :key="item.id"
+          class="nav-item"
+          :class="{ 'nav-item--active': activeNav === item.id }"
+          type="button"
+          @click="goTo(item.id)"
+        >
+          <span class="nav-dot" aria-hidden="true"></span>
+          {{ label(item.id) }}
+        </button>
+      </nav>
 
-      <div class="filters">
-        <label>
-          Ventana
-          <select v-model.number="days" @change="loadDashboard">
-            <option :value="7">7 dias</option>
-            <option :value="30">30 dias</option>
-            <option :value="90">90 dias</option>
-            <option :value="365">365 dias</option>
+      <div class="admin-account">
+        <span>{{ copy.adminAccount }}</span>
+        <strong>admin@pigui.ai</strong>
+      </div>
+    </aside>
+
+    <section class="content-shell">
+      <header class="content-topbar">
+        <div>
+          <p class="eyebrow">{{ copy.internalPlatform }}</p>
+          <h1>{{ pageTitle }}</h1>
+        </div>
+        <label v-if="showDateSelector" class="date-select">
+          {{ copy.dateRange }}
+          <select v-model="selectedRange">
+            <option v-for="range in dateRanges" :key="range">{{ range }}</option>
           </select>
         </label>
-        <button class="primary-button" type="button" @click="loadDashboard">Actualizar</button>
-      </div>
-    </header>
+      </header>
 
-    <section v-if="error" class="notice notice--error">{{ error }}</section>
-
-    <section class="metrics-grid" aria-label="Metricas generales">
-      <article v-for="metric in metrics" :key="metric.label" class="metric">
-        <span>{{ metric.label }}</span>
-        <strong>{{ metric.value }}</strong>
-      </article>
-    </section>
-
-    <section class="workspace">
-      <aside class="users-panel">
-        <div class="panel-header">
-          <div>
-            <h2>Usuarios</h2>
-            <p>{{ users.length }} con actividad</p>
+      <section v-if="route === 'dashboard'" class="page-stack">
+        <section class="panel">
+          <div class="section-heading">
+            <h2>Overview Metrics</h2>
           </div>
-          <input v-model="search" type="search" placeholder="Buscar correo" @input="loadUsers" />
-        </div>
-
-        <button
-          v-for="user in users"
-          :key="user.userId"
-          class="user-row"
-          :class="{ 'user-row--active': selectedUserId === user.userId }"
-          type="button"
-          @click="selectUser(user.userId)"
-        >
-          <span class="user-row__avatar">{{ initials(user.userId) }}</span>
-          <span class="user-row__content">
-            <span class="user-row__name">{{ user.email || user.displayName || "Sin correo" }}</span>
-            <span class="user-row__id">{{ user.displayName || user.phone || user.segment }}</span>
-            <span class="user-row__stats">{{ user.answers }} respuestas · {{ user.sessions }} sesiones</span>
-            <span class="user-row__chips">
-              <span class="mini-chip">{{ user.channel }}</span>
-              <span class="mini-chip mini-chip--segment">{{ user.segment }}</span>
-            </span>
-          </span>
-          <span class="user-row__badge">{{ user.completedSessions }}/{{ user.sessions }}</span>
-        </button>
-      </aside>
-
-      <section class="detail-panel">
-        <div class="panel-header">
-          <div>
-            <h2>{{ selectedUserId ? "Detalle por usuario" : "Respuestas recientes" }}</h2>
-            <p>{{ selectedUser?.profile?.email || selectedUser?.profile?.displayName || selectedUserId || "Selecciona un usuario para ver sus metricas" }}</p>
+          <div class="overview-grid">
+            <article v-for="metric in overviewMetrics" :key="metric.title" class="metric-card" :class="metric.color ? `metric-card--${metric.color}` : ''">
+              <span class="metric-card__label">{{ metric.title }}</span>
+              <strong>{{ metric.value }}</strong>
+              <p>{{ metric.detail }}</p>
+            </article>
           </div>
-        </div>
+        </section>
 
-        <article v-if="selectedUser?.profile" class="profile-card">
-          <div class="profile-card__avatar">{{ initials(selectedUser.profile.userId) }}</div>
-          <div class="profile-card__main">
-            <h3>{{ selectedUser.profile.email || "Usuario sin correo" }}</h3>
-            <p>{{ selectedUser.profile.displayName || selectedUser.profile.userId }}</p>
-            <div class="profile-card__meta">
-              <span class="pill pill--blue">{{ selectedUser.profile.channel }}</span>
-              <span class="pill pill--green">{{ selectedUser.profile.segment }}</span>
-              <span v-if="selectedUser.profile.email" class="pill">{{ selectedUser.profile.email }}</span>
-              <span v-if="selectedUser.profile.phone" class="pill">{{ selectedUser.profile.phone }}</span>
-              <span v-if="selectedUser.profile.deviceName" class="pill">{{ selectedUser.profile.deviceName }}</span>
-            </div>
+        <section class="panel">
+          <div class="section-heading">
+            <h2>Customer Journey Flow</h2>
           </div>
-        </article>
-
-        <div v-if="selectedUser" class="detail-grid">
-          <article class="detail-card">
-            <div class="card-title">
-              <h3>Sesiones</h3>
-              <span>{{ selectedUser.sessions.length }}</span>
-            </div>
-            <div class="session-list">
-              <div v-for="session in selectedUser.sessions" :key="session.id" class="session-row">
-                <strong :class="`status status--${session.status}`">{{ session.status }}</strong>
-                <span>{{ session.answersCount }} respuestas</span>
-                <small>{{ formatDate(session.updatedAt) }}</small>
+          <div class="journey-grid">
+            <article v-for="agent in agents" :key="agent.id" class="journey-step">
+              <span class="journey-step__number">{{ agent.step }}</span>
+              <div>
+                <h3>{{ agent.name }}</h3>
+                <span class="area-chip" :class="areaClass(agent.area)">{{ agent.area }}</span>
+                <strong>{{ agent.conversations.toLocaleString() }} conversations</strong>
+                <p>{{ agent.purpose }}</p>
               </div>
-            </div>
-          </article>
+            </article>
+          </div>
+        </section>
+      </section>
 
-          <article class="detail-card">
-            <div class="card-title">
-              <h3>Canal y origen</h3>
-              <span>{{ selectedUser.answerSourceMetrics.length + selectedUser.deviceMetrics.length }}</span>
-            </div>
-            <div class="bar-list">
-              <div v-for="item in channelRows" :key="item.label" class="bar-row">
-                <span>{{ item.label }}</span>
-                <div class="bar-track">
-                  <div class="bar-fill" :style="{ width: relativeWidth(item.total, channelRows) }"></div>
-                </div>
-                <strong>{{ item.total }}</strong>
-              </div>
-            </div>
+      <section v-else-if="route === 'clients'" class="page-stack">
+        <div class="metric-row">
+          <article v-for="metric in clientMetrics" :key="metric.title" class="stat-card">
+            <span>{{ metric.title }}</span>
+            <strong>{{ metric.value }}</strong>
+            <p>{{ metric.detail }}</p>
           </article>
         </div>
 
-        <div v-if="selectedUser" class="detail-grid detail-grid--secondary">
-          <article class="detail-card">
-            <div class="card-title">
-              <h3>Bloques respondidos</h3>
-              <span>{{ selectedUser.blockMetrics.length }}</span>
-            </div>
-            <div class="bar-list">
-              <div v-for="block in selectedUser.blockMetrics" :key="block.block" class="bar-row">
-                <span>{{ block.block }}</span>
-                <div class="bar-track">
-                  <div class="bar-fill" :style="{ width: relativeWidth(block.answers, selectedUser.blockMetrics, 'answers') }"></div>
-                </div>
-                <strong>{{ block.answers }}</strong>
-              </div>
-            </div>
-          </article>
+        <section class="panel">
+          <div class="table-toolbar">
+            <h2>Clients</h2>
+            <input v-model="clientSearch" type="search" placeholder="Search by name, email or phone" />
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Country</th>
+                  <th>State</th>
+                  <th>City</th>
+                  <th>Interactions</th>
+                  <th>Journey</th>
+                  <th>Last agent</th>
+                  <th>Last activity</th>
+                  <th>Status</th>
+                  <th>View client</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="client in filteredClients" :key="client.id">
+                  <td>{{ client.name }}</td>
+                  <td>{{ client.email }}</td>
+                  <td>{{ client.phone }}</td>
+                  <td>{{ client.country }}</td>
+                  <td>{{ client.state }}</td>
+                  <td>{{ client.city }}</td>
+                  <td>{{ client.interactions }}</td>
+                  <td>{{ client.journey }}</td>
+                  <td>{{ client.lastAgent }}</td>
+                  <td>{{ client.lastActivity }}</td>
+                  <td><span class="status-chip" :class="statusClass(client.status)">{{ client.status }}</span></td>
+                  <td><button class="table-action" type="button" @click="openClient(client.id)">View client</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
 
-          <article class="detail-card">
-            <div class="card-title">
-              <h3>B2B / B2O / B2C</h3>
-              <span>{{ selectedUser.sourceMetrics.length || 1 }}</span>
-            </div>
-            <div class="segment-grid">
-              <span class="segment-pill" :class="{ 'segment-pill--on': selectedUser.profile?.hasB2b }">B2B</span>
-              <span class="segment-pill" :class="{ 'segment-pill--on': selectedUser.profile?.hasB2o }">B2O</span>
-              <span class="segment-pill" :class="{ 'segment-pill--on': selectedUser.profile?.hasB2c }">B2C</span>
-            </div>
-            <div class="bar-list">
-              <div v-for="source in selectedUser.sourceMetrics" :key="source.source" class="bar-row">
-                <span>{{ source.source }}</span>
-                <div class="bar-track">
-                  <div class="bar-fill" :style="{ width: relativeWidth(source.total, selectedUser.sourceMetrics, 'total') }"></div>
-                </div>
-                <strong>{{ source.total }}</strong>
-              </div>
-            </div>
+      <section v-else-if="route === 'client-detail' && selectedClient" class="page-stack">
+        <div class="breadcrumb">Clients / {{ selectedClient.name }}</div>
+        <div class="metric-row">
+          <article class="stat-card"><span>Interactions</span><strong>{{ selectedClient.interactions }}</strong><p>Total interactions registered</p></article>
+          <article class="stat-card"><span>Journey</span><strong>{{ selectedClient.journey }}</strong><p>Completed stages</p></article>
+          <article class="stat-card"><span>Last agent</span><strong>{{ selectedClient.lastAgent }}</strong><p>Last conversation registered</p></article>
+          <article class="stat-card"><span>Last activity</span><strong>{{ selectedClient.lastActivity }}</strong><p>Most recent activity</p></article>
+        </div>
+        <div class="two-column">
+          <section class="panel">
+            <h2>Client information</h2>
+            <dl class="detail-list">
+              <div><dt>Name</dt><dd>{{ selectedClient.name }}</dd></div>
+              <div><dt>Email</dt><dd>{{ selectedClient.email }}</dd></div>
+              <div><dt>Phone</dt><dd>{{ selectedClient.phone }}</dd></div>
+              <div><dt>Country</dt><dd>{{ selectedClient.country }}</dd></div>
+              <div><dt>State</dt><dd>{{ selectedClient.state }}</dd></div>
+              <div><dt>City</dt><dd>{{ selectedClient.city }}</dd></div>
+              <div><dt>Client status</dt><dd>{{ selectedClient.status }}</dd></div>
+            </dl>
+          </section>
+          <section class="panel">
+            <h2>Identifiers</h2>
+            <dl class="detail-list">
+              <div><dt>Pigui Business ID</dt><dd>{{ selectedClient.piguiBusinessId }}</dd></div>
+              <div><dt>Pigui Scan ID</dt><dd>{{ selectedClient.piguiScanId }}</dd></div>
+              <div><dt>Pigui Rewards ID</dt><dd>{{ selectedClient.piguiRewardsId }}</dd></div>
+            </dl>
+            <button class="primary-action" type="button" @click="openClientConversations(selectedClient.id)">View conversations</button>
+          </section>
+        </div>
+      </section>
+
+      <section v-else-if="route === 'client-conversations' && selectedClient" class="page-stack">
+        <div class="breadcrumb">Clients / {{ selectedClient.name }} / Conversations</div>
+        <div class="metric-row">
+          <article class="stat-card"><span>Selected client</span><strong>{{ selectedClient.name }}</strong><p>Client context</p></article>
+          <article class="stat-card"><span>Conversations</span><strong>{{ selectedClientConversations.length }}</strong><p>transcripts</p></article>
+          <article class="stat-card"><span>Last interaction</span><strong>{{ selectedClient.lastActivity }}</strong><p>Most recent activity</p></article>
+        </div>
+        <ConversationTable :rows="selectedClientConversations" @transcript="openTranscript" @download="downloadTranscript" />
+      </section>
+
+      <section v-else-if="route === 'conversations'" class="page-stack">
+        <div class="metric-row">
+          <article v-for="metric in conversationMetrics" :key="metric.title" class="stat-card">
+            <span>{{ metric.title }}</span>
+            <strong>{{ metric.value }}</strong>
+            <p>{{ metric.detail }}</p>
           </article>
         </div>
-
-        <article class="answers-list">
-          <div class="card-title">
-            <h3>{{ selectedUser ? "Respuestas del usuario" : "Ultimas respuestas guardadas" }}</h3>
-            <span>{{ visibleAnswers.length }}</span>
-          </div>
-          <div v-for="answer in visibleAnswers" :key="answer.sessionId + answer.question + answer.updatedAt" class="answer-row">
-            <div class="answer-row__meta">
-              <span class="pill">{{ answer.block || "sin_bloque" }}</span>
-              <span class="pill">{{ answer.answerSource || "sin_fuente" }}</span>
-              <span>{{ formatDate(answer.updatedAt) }}</span>
-              <span v-if="'userId' in answer">{{ answer.userId }}</span>
+        <section class="panel">
+          <div class="table-toolbar">
+            <div>
+              <h2>Conversations</h2>
+              <p>Global history of conversations across all clients and agents.</p>
             </div>
-            <p class="question">{{ answer.question || "Pregunta sin titulo" }}</p>
-            <p class="answer">{{ answer.answer || "Sin respuesta registrada" }}</p>
+            <input v-model="conversationSearch" type="search" placeholder="Search conversation or client" />
           </div>
-        </article>
+          <div class="filter-row">
+            <select v-model="conversationFilters.area"><option>All areas</option><option>Web</option><option>B2B</option><option>B2C</option><option>B2O</option></select>
+            <select v-model="conversationFilters.agent"><option>All agents</option><option v-for="agent in agents" :key="agent.name">{{ agent.name }}</option></select>
+            <select v-model="conversationFilters.status"><option>All statuses</option><option>Completed</option><option>In progress</option><option>Failed</option></select>
+            <select v-model="conversationFilters.friction"><option>All friction</option><option>Yes</option><option>No</option></select>
+          </div>
+          <ConversationTable :rows="filteredConversations" @transcript="openTranscript" @download="downloadTranscript" />
+        </section>
+      </section>
+
+      <section v-else-if="route === 'transcript' && selectedConversation" class="page-stack">
+        <div class="breadcrumb">{{ transcriptContext === 'clients' ? `Clients / ${selectedConversation.client} / Conversations / Transcript` : `Conversations / ${selectedConversation.client} / ${selectedConversation.agent} / Transcript` }}</div>
+        <div class="metric-row">
+          <article class="stat-card"><span>Client</span><strong>{{ selectedConversation.client }}</strong><p>{{ selectedConversation.area }} context</p></article>
+          <article class="stat-card"><span>Agent</span><strong>{{ selectedConversation.agent }}</strong><p>Conversation owner</p></article>
+          <article class="stat-card"><span>Date</span><strong>{{ selectedConversation.date }}</strong><p>Conversation date</p></article>
+          <article class="stat-card"><span>Duration</span><strong>{{ selectedConversation.duration }}</strong><p>Total duration</p></article>
+        </div>
+        <section class="panel">
+          <div class="table-toolbar">
+            <h2>Full transcript</h2>
+            <button class="primary-action" type="button" @click="downloadTranscript(selectedConversation.id)">Download transcript</button>
+          </div>
+          <div class="transcript-list">
+            <article v-for="row in selectedConversation.transcript" :key="row.timestamp + row.message" class="transcript-row" :class="row.speaker === 'Pigui' ? 'transcript-row--pigui' : 'transcript-row--client'">
+              <time>{{ row.timestamp }}</time>
+              <strong>{{ row.speaker }}:</strong>
+              <p>{{ row.message }}</p>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section v-else-if="route === 'agents'" class="page-stack">
+        <div class="metric-row">
+          <article v-for="metric in agentMetrics" :key="metric.title" class="stat-card">
+            <span>{{ metric.title }}</span>
+            <strong>{{ metric.value }}</strong>
+            <p>{{ metric.detail }}</p>
+          </article>
+        </div>
+        <section class="panel">
+          <div class="table-toolbar">
+            <h2>Agents</h2>
+            <input v-model="agentSearch" type="search" placeholder="Search agent" />
+          </div>
+          <div class="filter-row">
+            <select v-model="agentFilters.area"><option>All areas</option><option>Web</option><option>B2B</option><option>B2C</option><option>B2O</option></select>
+            <select v-model="agentFilters.status"><option>All statuses</option><option>Active</option></select>
+            <select v-model="agentFilters.type"><option>All types</option><option>Commercial</option><option>Baseline</option><option>Feedback</option><option>Operative</option><option>Financial</option><option>Consumer</option></select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Agent</th><th>Area</th><th>Status</th><th>Type</th><th>Clients with activity</th><th>Conversations</th><th>Last activity</th></tr></thead>
+              <tbody>
+                <tr v-for="agent in filteredAgents" :key="agent.id">
+                  <td>{{ agent.name }}</td>
+                  <td><span class="area-chip" :class="areaClass(agent.area)">{{ agent.area }}</span></td>
+                  <td><span class="status-chip status-chip--completed">{{ agent.status }}</span></td>
+                  <td>{{ agent.type }}</td>
+                  <td>{{ agent.clientsWithActivity }}</td>
+                  <td>{{ agent.conversations }}</td>
+                  <td>{{ agent.lastActivity }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section v-else-if="route === 'insights'" class="page-stack">
+        <div class="metric-row">
+          <article v-for="metric in insightMetrics" :key="metric.title" class="stat-card">
+            <span>{{ metric.title }}</span>
+            <strong>{{ metric.value }}</strong>
+            <p>{{ metric.detail }}</p>
+          </article>
+        </div>
+        <div class="insight-blocks">
+          <section v-for="block in insightBlocks" :key="block.title" class="panel">
+            <h2>{{ block.title }}</h2>
+            <ul class="insight-list">
+              <li v-for="item in block.items" :key="item">{{ item }}</li>
+            </ul>
+          </section>
+        </div>
+        <section class="panel">
+          <h2>Insights table</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Type</th><th>Insight</th><th>Area</th><th>Source agent</th><th>Related clients</th><th>Priority</th><th>Date</th></tr></thead>
+              <tbody>
+                <tr v-for="insight in insights" :key="insight.id">
+                  <td>{{ insight.type }}</td>
+                  <td>{{ insight.insight }}</td>
+                  <td><span class="area-chip" :class="areaClass(insight.area)">{{ insight.area }}</span></td>
+                  <td>{{ insight.sourceAgent }}</td>
+                  <td>{{ insight.relatedClients }}</td>
+                  <td><span class="priority" :class="`priority--${insight.priority.toLowerCase()}`">{{ insight.priority }}</span></td>
+                  <td>{{ insight.date }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section v-else-if="route === 'settings'" class="page-stack settings-grid">
+        <section class="panel">
+          <h2>Administrator Profile</h2>
+          <label>Name<input v-model="settings.adminName" /></label>
+          <label>Email<input v-model="settings.adminEmail" /></label>
+          <label>Role<input v-model="settings.adminRole" /></label>
+          <button class="secondary-action" type="button">Reset password</button>
+        </section>
+        <section class="panel">
+          <h2>Dashboard Preferences</h2>
+          <label>Dashboard language<select v-model="settings.dashboardLanguage"><option>English</option><option>Spanish</option></select></label>
+          <label>Time zone<select v-model="settings.timeZone"><option>US Central Time</option><option>US Eastern Time</option><option>US Pacific Time</option><option>US Mountain Time</option><option>Mexico City</option><option>Custom</option></select></label>
+          <label>Default date range<select v-model="settings.defaultDateRange"><option v-for="range in dateRanges" :key="range">{{ range }}</option></select></label>
+          <label>Time format<select v-model="settings.timeFormat"><option>12-hour</option><option>24-hour</option></select></label>
+          <button class="primary-action" type="button">Save changes</button>
+        </section>
+        <section class="panel">
+          <h2>Alerts & Monitoring</h2>
+          <label class="toggle-row"><input v-model="settings.criticalFrictionAlerts" type="checkbox" /> Critical friction alerts</label>
+          <label class="toggle-row"><input v-model="settings.integrationFailureAlerts" type="checkbox" /> Integration failure alerts</label>
+          <label class="toggle-row"><input v-model="settings.automaticInsightsSummary" type="checkbox" /> Automatic insights summary</label>
+        </section>
+        <section class="panel">
+          <h2>Integrations</h2>
+          <article v-for="integration in integrations" :key="integration.name" class="integration-row">
+            <div>
+              <strong>{{ integration.name }}</strong>
+              <p>{{ integration.description }}</p>
+            </div>
+            <span class="status-chip status-chip--completed">Connected</span>
+          </article>
+        </section>
       </section>
     </section>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, defineComponent, h, onMounted, ref } from "vue";
 
-type Summary = {
-  users: number;
-  sessions: number;
-  completedSessions: number;
-  answers: number;
-  avgAnswersPerSession: number;
-  recommendationEvents: number;
-  acceptedRecommendations: number;
-  webUsers: number;
-  mobileUsers: number;
-  b2bUsers: number;
-  b2cUsers: number;
-  b2oUsers: number;
+type NavId = "dashboard" | "clients" | "conversations" | "agents" | "insights" | "settings";
+type Route = NavId | "client-detail" | "client-conversations" | "transcript";
+type Area = "Web" | "B2B" | "B2C" | "B2O";
+type Status = "Completed" | "In progress" | "New" | "Failed";
+
+type Client = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  country: string;
+  state: string;
+  city: string;
+  interactions: number;
+  journey: string;
+  lastAgent: string;
+  lastActivity: string;
+  status: Status;
+  piguiBusinessId: string;
+  piguiScanId: string;
+  piguiRewardsId: string;
 };
 
-type UserRow = {
-  userId: string;
-  sessions: number;
-  branches: number;
-  completedSessions: number;
-  answers: number;
-  avgAnswersPerSession: number;
-  lastActivityAt: string;
-  displayName: string | null;
-  email: string | null;
-  phone: string | null;
-  channel: string;
-  deviceType: string;
-  deviceName: string | null;
-  segment: string;
-  hasB2b: boolean;
-  hasB2c: boolean;
-  hasB2o: boolean;
-  b2cEvents: number;
-  b2oEvents: number;
+type Agent = {
+  id: string;
+  step: string;
+  name: string;
+  area: Area;
+  status: "Active";
+  type: string;
+  clientsWithActivity: number;
+  conversations: number;
+  lastActivity: string;
+  purpose: string;
 };
 
-type AnswerRow = {
-  userId?: string;
-  sessionId: string;
-  branchId: string | null;
-  question: string | null;
-  answer: string | null;
-  answerSource?: string | null;
-  block: string | null;
-  updatedAt: string;
+type TranscriptRow = { timestamp: string; speaker: "Pigui" | string; message: string };
+type Conversation = {
+  id: string;
+  clientId: string;
+  client: string;
+  agent: string;
+  area: Area;
+  date: string;
+  duration: string;
+  status: "Completed" | "In progress" | "Failed";
+  friction: "Yes" | "No";
+  transcript: TranscriptRow[];
 };
 
-type UserDetail = {
-  profile: {
-    userId: string;
-    displayName: string | null;
-    email: string | null;
-    phone: string | null;
-    channel: string;
-    deviceType: string;
-    deviceName: string | null;
-    deviceLastActivity: string | null;
-    segment: string;
-    hasB2b: boolean;
-    hasB2c: boolean;
-    hasB2o: boolean;
-  } | null;
-  sessions: Array<{
-    id: string;
-    branchId: string | null;
-    status: string;
-    currentQuestionIndex: number;
-    answersCount: number;
-    createdAt: string;
-    updatedAt: string;
-    completedAt: string | null;
-  }>;
-  blockMetrics: Array<{ block: string; answers: number }>;
-  sourceMetrics: Array<{ source: string; total: number }>;
-  deviceMetrics: Array<{ deviceType: string; total: number }>;
-  answerSourceMetrics: Array<{ source: string; total: number }>;
-  answers: AnswerRow[];
-};
+const isSignedIn = ref(false);
+const signInEmail = ref("admin@pigui.ai");
+const signInPassword = ref("");
+const route = ref<Route>("dashboard");
+const activeNav = ref<NavId>("dashboard");
+const selectedRange = ref("Last 30 days");
+const selectedClientId = ref("sergio-romero");
+const selectedConversationId = ref("");
+const transcriptContext = ref<"clients" | "conversations">("conversations");
+const clientSearch = ref("");
+const conversationSearch = ref("");
+const agentSearch = ref("");
+const conversationFilters = ref({ area: "All areas", agent: "All agents", status: "All statuses", friction: "All friction" });
+const agentFilters = ref({ area: "All areas", status: "All statuses", type: "All types" });
+const dateRanges = ["Last 7 days", "Last 30 days", "Last 90 days", "Last 12 months", "Custom"];
+const navItems: Array<{ id: NavId }> = [
+  { id: "dashboard" },
+  { id: "clients" },
+  { id: "conversations" },
+  { id: "agents" },
+  { id: "insights" },
+  { id: "settings" }
+];
 
-const days = ref(30);
-const search = ref("");
-const error = ref("");
-const summary = ref<Summary>({
-  users: 0,
-  sessions: 0,
-  completedSessions: 0,
-  answers: 0,
-  avgAnswersPerSession: 0,
-  recommendationEvents: 0,
-  acceptedRecommendations: 0,
-  webUsers: 0,
-  mobileUsers: 0,
-  b2bUsers: 0,
-  b2cUsers: 0,
-  b2oUsers: 0
-});
-const users = ref<UserRow[]>([]);
-const recentAnswers = ref<AnswerRow[]>([]);
-const selectedUserId = ref("");
-const selectedUser = ref<UserDetail | null>(null);
-let searchTimer: number | undefined;
-
-const api = async <T,>(url: string): Promise<T> => {
-  const response = await fetch(url);
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || body.error || `HTTP ${response.status}`);
-  }
-  return response.json() as Promise<T>;
-};
-
-const metrics = computed(() => [
-  { label: "Usuarios", value: summary.value.users.toLocaleString("es-MX") },
-  { label: "Sesiones", value: summary.value.sessions.toLocaleString("es-MX") },
-  { label: "Completadas", value: summary.value.completedSessions.toLocaleString("es-MX") },
-  { label: "Respuestas", value: summary.value.answers.toLocaleString("es-MX") },
-  { label: "Web / movil", value: `${summary.value.webUsers}/${summary.value.mobileUsers}` },
-  { label: "B2B / B2O / B2C", value: `${summary.value.b2bUsers}/${summary.value.b2oUsers}/${summary.value.b2cUsers}` }
-]);
-
-const visibleAnswers = computed(() => selectedUser.value?.answers || recentAnswers.value);
-const channelRows = computed(() => {
-  if (!selectedUser.value) return [];
-
-  const devices = selectedUser.value.deviceMetrics.map((item) => ({
-    label: formatDevice(item.deviceType),
-    total: item.total
-  }));
-  const answerSources = selectedUser.value.answerSourceMetrics.map((item) => ({
-    label: `Respuesta: ${item.source}`,
-    total: item.total
-  }));
-
-  if (devices.length === 0) {
-    devices.push({ label: selectedUser.value.profile?.channel || "Sin dispositivo", total: 0 });
-  }
-
-  return [...devices, ...answerSources];
+const settings = ref({
+  adminName: "Dante Kurai",
+  adminEmail: "admin@pigui.ai",
+  adminRole: "Administrator",
+  dashboardLanguage: "English",
+  timeZone: "US Central Time",
+  defaultDateRange: "Last 30 days",
+  timeFormat: "12-hour",
+  criticalFrictionAlerts: true,
+  integrationFailureAlerts: true,
+  automaticInsightsSummary: true
 });
 
-const loadSummary = async () => {
-  summary.value = await api<Summary>(`/api/summary?days=${days.value}`);
+const copy = computed(() => {
+  const spanish = settings.value.dashboardLanguage === "Spanish";
+  return {
+    internalPlatform: spanish ? "Plataforma interna" : "Internal platform",
+    adminAccount: spanish ? "Cuenta de administrador" : "Admin account",
+    dateRange: spanish ? "Rango de fecha" : "Date range",
+    dashboard: spanish ? "Dashboard" : "Dashboard",
+    clients: spanish ? "Clientes" : "Clients",
+    conversations: spanish ? "Conversaciones" : "Conversations",
+    agents: spanish ? "Agentes" : "Agents",
+    insights: spanish ? "Hallazgos" : "Insights",
+    settings: spanish ? "Configuración" : "Settings"
+  };
+});
+
+const label = (id: NavId) => copy.value[id];
+
+const agents: Agent[] = [
+  { id: "website", step: "01", name: "Website Agent", area: "Web", status: "Active", type: "Commercial", clientsWithActivity: 430, conversations: 430, lastActivity: "Today, 10:42", purpose: "Captures website visitor and prospect conversations." },
+  { id: "baseline-b2b", step: "02", name: "Personal & Business Baseline Agent", area: "B2B", status: "Active", type: "Baseline", clientsWithActivity: 357, conversations: 357, lastActivity: "Today, 10:15", purpose: "Gets to know the user and the business inside Pigui Business." },
+  { id: "onboarding-feedback", step: "03", name: "Onboarding Feedback Agent", area: "B2B", status: "Active", type: "Feedback", clientsWithActivity: 271, conversations: 271, lastActivity: "Today, 09:58", purpose: "Captures feedback after onboarding." },
+  { id: "branch", step: "04", name: "Operative Branch Agent", area: "B2B", status: "Active", type: "Operative", clientsWithActivity: 184, conversations: 184, lastActivity: "Today, 09:40", purpose: "Supports operational branch-related questions." },
+  { id: "financial", step: "05", name: "Dashboard Financial Agent", area: "B2B", status: "Active", type: "Financial", clientsWithActivity: 112, conversations: 112, lastActivity: "Today, 09:22", purpose: "Helps users understand numbers, financial metrics, and dashboard data." },
+  { id: "consumer-baseline", step: "06", name: "Consumer Baseline Agent", area: "B2C", status: "Active", type: "Consumer", clientsWithActivity: 92, conversations: 92, lastActivity: "Yesterday, 18:10", purpose: "Gets to know the consumer inside Pigui Rewards." },
+  { id: "rewards-feedback", step: "07", name: "Rewards Feedback Agent", area: "B2C", status: "Active", type: "Feedback", clientsWithActivity: 76, conversations: 76, lastActivity: "Yesterday, 17:42", purpose: "Captures feedback about the Pigui Rewards experience." },
+  { id: "scan-feedback", step: "08", name: "Scan Feedback Agent", area: "B2O", status: "Active", type: "Feedback", clientsWithActivity: 64, conversations: 64, lastActivity: "Yesterday, 16:55", purpose: "Captures feedback about the Pigui Scan experience." },
+  { id: "feedback-overview", step: "09", name: "Feedback Overview Agent", area: "B2B", status: "Active", type: "Feedback", clientsWithActivity: 64, conversations: 64, lastActivity: "Yesterday, 16:20", purpose: "Captures final feedback after Business, Rewards, and Scan." }
+];
+
+const clients: Client[] = [
+  { id: "sergio-romero", name: "Sergio Romero", email: "sergio.romero@acme.com", phone: "+52 55 1234 5678", country: "Mexico", state: "Mexico City", city: "Mexico City", interactions: 128, journey: "9/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "08 Jun 2026, 10:24", status: "Completed", piguiBusinessId: "PB-1001", piguiScanId: "PS-4301", piguiRewardsId: "PR-9001" },
+  { id: "ana-torres", name: "Ana Torres", email: "ana.torres@northstar.com", phone: "+1 512 555 0102", country: "United States", state: "Texas", city: "Austin", interactions: 86, journey: "7/9", lastAgent: "Rewards Feedback Agent", lastActivity: "Today, 10:42", status: "In progress", piguiBusinessId: "PB-1002", piguiScanId: "PS-4302", piguiRewardsId: "PR-9002" },
+  { id: "carlos-mendez", name: "Carlos Mendez", email: "carlos.mendez@local.mx", phone: "+52 81 5555 1234", country: "Mexico", state: "Nuevo Leon", city: "Monterrey", interactions: 74, journey: "6/9", lastAgent: "Consumer Baseline Agent", lastActivity: "Today, 09:58", status: "In progress", piguiBusinessId: "PB-1003", piguiScanId: "PS-4303", piguiRewardsId: "PR-9003" },
+  { id: "mariana-lopez", name: "Mariana Lopez", email: "mariana.lopez@retail.co", phone: "+52 33 1234 9090", country: "Mexico", state: "Jalisco", city: "Guadalajara", interactions: 65, journey: "5/9", lastAgent: "Dashboard Financial Agent", lastActivity: "Yesterday, 18:10", status: "In progress", piguiBusinessId: "PB-1004", piguiScanId: "PS-4304", piguiRewardsId: "PR-9004" },
+  { id: "roberto-cruz", name: "Roberto Cruz", email: "roberto.cruz@services.io", phone: "+1 312 555 0144", country: "United States", state: "Illinois", city: "Chicago", interactions: 54, journey: "3/9", lastAgent: "Onboarding Feedback Agent", lastActivity: "Yesterday, 16:55", status: "New", piguiBusinessId: "PB-1005", piguiScanId: "PS-4305", piguiRewardsId: "PR-9005" },
+  { id: "sofia-herrera", name: "Sofia Herrera", email: "sofia.herrera@coffee.us", phone: "+1 602 555 0182", country: "United States", state: "Arizona", city: "Phoenix", interactions: 92, journey: "9/9", lastAgent: "Feedback Overview Agent", lastActivity: "07 Jun 2026, 14:08", status: "Completed", piguiBusinessId: "PB-1006", piguiScanId: "PS-4306", piguiRewardsId: "PR-9006" },
+  { id: "diego-martinez", name: "Diego Martinez", email: "diego.martinez@growth.ai", phone: "+52 55 9988 2211", country: "Mexico", state: "Mexico City", city: "Mexico City", interactions: 49, journey: "4/9", lastAgent: "Operative Branch Agent", lastActivity: "06 Jun 2026, 11:21", status: "In progress", piguiBusinessId: "PB-1007", piguiScanId: "PS-4307", piguiRewardsId: "PR-9007" },
+  { id: "laura-jimenez", name: "Laura Jimenez", email: "laura.jimenez@wellness.com", phone: "+1 415 555 0198", country: "United States", state: "California", city: "San Francisco", interactions: 43, journey: "2/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "05 Jun 2026, 09:18", status: "New", piguiBusinessId: "PB-1008", piguiScanId: "PS-4308", piguiRewardsId: "PR-9008" },
+  { id: "jorge-ramirez", name: "Jorge Ramirez", email: "jorge.ramirez@market.mx", phone: "+52 55 4488 7711", country: "Mexico", state: "Puebla", city: "Puebla", interactions: 38, journey: "8/9", lastAgent: "Scan Feedback Agent", lastActivity: "04 Jun 2026, 17:40", status: "In progress", piguiBusinessId: "PB-1009", piguiScanId: "PS-4309", piguiRewardsId: "PR-9009" },
+  { id: "paola-sanchez", name: "Paola Sanchez", email: "paola.sanchez@beauty.mx", phone: "+52 33 8877 2211", country: "Mexico", state: "Jalisco", city: "Zapopan", interactions: 31, journey: "1/9", lastAgent: "Website Agent", lastActivity: "02 Jun 2026, 12:33", status: "New", piguiBusinessId: "PB-1010", piguiScanId: "PS-4310", piguiRewardsId: "PR-9010" }
+];
+
+const transcriptSeed = (client: string): TranscriptRow[] => [
+  { timestamp: "00:00", speaker: "Pigui", message: `Hello ${client}, thanks for your time. I will ask a few quick questions to understand your experience.` },
+  { timestamp: "00:28", speaker: client, message: "Hi, I am evaluating Pigui for my business and want to understand how it helps customers." },
+  { timestamp: "01:02", speaker: "Pigui", message: "Thank you. What part of the experience felt clearest so far?" },
+  { timestamp: "01:38", speaker: client, message: "The dashboard is clear, but I needed more guidance after scanning the QR." },
+  { timestamp: "02:14", speaker: "Pigui", message: "That is helpful feedback. I will take that into account for the product team." }
+];
+
+const conversations: Conversation[] = clients.flatMap((client, index) =>
+  agents.slice(0, Math.min(9, index % 9 + 1)).map((agent, agentIndex) => ({
+    id: `${client.id}-${agent.id}`,
+    clientId: client.id,
+    client: client.name,
+    agent: agent.name,
+    area: agent.area,
+    date: agentIndex % 2 === 0 ? "08 Jun 2026, 10:24" : "Today, 10:42",
+    duration: `${Math.max(2, agentIndex + 2)}m ${String((agentIndex + 1) * 7).padStart(2, "0")}s`,
+    status: agentIndex % 8 === 0 && index > 4 ? "In progress" : "Completed",
+    friction: (agentIndex + index) % 4 === 0 ? "Yes" : "No",
+    transcript: transcriptSeed(client.name)
+  }))
+);
+
+const insights = [
+  { id: "i1", type: "Finding", insight: "B2B concentrates most conversation activity.", area: "B2B" as Area, sourceAgent: "Personal & Business Baseline Agent", relatedClients: 127, priority: "Medium", date: "08 Jun 2026" },
+  { id: "i2", type: "Friction", insight: "Some customers do not understand why baseline questions are needed.", area: "B2B" as Area, sourceAgent: "Onboarding Feedback Agent", relatedClients: 42, priority: "High", date: "08 Jun 2026" },
+  { id: "i3", type: "Opportunity", insight: "Improve the transition from Pigui Business to Pigui Scan.", area: "B2O" as Area, sourceAgent: "Scan Feedback Agent", relatedClients: 36, priority: "Medium", date: "07 Jun 2026" },
+  { id: "i4", type: "Friction", insight: "Rewards redemption flow needs clearer explanation.", area: "B2C" as Area, sourceAgent: "Rewards Feedback Agent", relatedClients: 29, priority: "High", date: "07 Jun 2026" },
+  { id: "i5", type: "Finding", insight: "Feedback Overview helps consolidate signals from Business, Scan and Rewards.", area: "B2B" as Area, sourceAgent: "Feedback Overview Agent", relatedClients: 64, priority: "Low", date: "06 Jun 2026" }
+];
+
+const integrations = [
+  { name: "Internal database", description: "Stores clients, conversations, agents, transcripts and metrics." },
+  { name: "AI Feedback", description: "Processes frictions, bugs, confusion, opportunities and risks automatically." },
+  { name: "Machine Learning Layer", description: "Receives structured conversation data for global learning." }
+];
+
+const selectedClient = computed(() => clients.find((client) => client.id === selectedClientId.value));
+const selectedConversation = computed(() => conversations.find((conversation) => conversation.id === selectedConversationId.value));
+const selectedClientConversations = computed(() => conversations.filter((conversation) => conversation.clientId === selectedClientId.value));
+const showDateSelector = computed(() => route.value === "dashboard" || route.value === "conversations");
+const pageTitle = computed(() => {
+  if (route.value === "client-detail") return selectedClient.value?.name || "Client";
+  if (route.value === "client-conversations") return "Client conversations";
+  if (route.value === "transcript") return "Transcript";
+  return label(activeNav.value);
+});
+
+const overviewMetrics = [
+  { title: "Website", value: "430", detail: "conversations · 1 agent", color: "web" },
+  { title: "Pigui Business", value: "310", detail: "conversations · 5 agents", color: "b2b" },
+  { title: "Pigui Scan", value: "120", detail: "conversations · 1 agent", color: "b2o" },
+  { title: "Pigui Rewards", value: "180", detail: "conversations · 2 agents", color: "b2c" },
+  { title: "Clients", value: "500", detail: "registered · Across the ecosystem" },
+  { title: "Pigui Agents", value: "9", detail: "active · Across the ecosystem" },
+  { title: "Conversations", value: "4,820", detail: "transcripts · Generated in this period" },
+  { title: "Completed Journey", value: "64", detail: "successful · Across the ecosystem" }
+];
+const clientMetrics = [
+  { title: "Clients", value: "500", detail: "Total registered clients" },
+  { title: "Active clients", value: "376", detail: "Clients with recent activity" },
+  { title: "Clients with completed journey", value: "64", detail: "Completed all 9 stages" },
+  { title: "Total interactions", value: "4,820", detail: "Total activity in this period" }
+];
+const conversationMetrics = [
+  { title: "Conversations", value: "4,820", detail: "Generated in this period" },
+  { title: "Clients with conversations", value: "376", detail: "With at least one interaction" },
+  { title: "Completed conversations", value: "4,215", detail: "Closed correctly" },
+  { title: "Conversations with friction", value: "244", detail: "With detected friction signals" }
+];
+const agentMetrics = [
+  { title: "Total agents", value: "9", detail: "Available across the ecosystem" },
+  { title: "Active agents", value: "9", detail: "Currently active" },
+  { title: "Conversations", value: "4,820", detail: "Generated in this period" },
+  { title: "Clients with activity", value: "500", detail: "With agent interaction" }
+];
+const insightMetrics = [
+  { title: "Insights detected", value: "128", detail: "Generated from conversations" },
+  { title: "Frictions detected", value: "42", detail: "Issues or confusion signals" },
+  { title: "Opportunities detected", value: "36", detail: "Product or growth opportunities" },
+  { title: "Clients impacted", value: "89", detail: "Related to detected insights" }
+];
+const insightBlocks = [
+  { title: "Key findings", items: ["B2B concentrates most conversation activity.", "Customers understand Pigui better after reviewing the Dashboard.", "Users who complete Rewards Feedback are more likely to reach Feedback Overview."] },
+  { title: "Detected frictions", items: ["Users report confusion between Dashboard and app installation.", "Rewards redemption flow needs clearer explanation.", "Scan users report uncertainty around camera permissions."] },
+  { title: "Opportunities", items: ["Improve the transition from Pigui Business to Pigui Scan.", "Create a short explanation before the Consumer Baseline.", "Add proactive guidance when users repeat the same question."] }
+];
+
+const filteredClients = computed(() => {
+  const term = clientSearch.value.toLowerCase().trim();
+  if (!term) return clients;
+  return clients.filter((client) => `${client.name} ${client.email} ${client.phone}`.toLowerCase().includes(term));
+});
+const filteredConversations = computed(() => {
+  const term = conversationSearch.value.toLowerCase().trim();
+  return conversations.filter((conversation) => {
+    const matchesTerm = !term || `${conversation.client} ${conversation.agent} ${conversation.area} ${conversation.transcript.map((row) => row.message).join(" ")}`.toLowerCase().includes(term);
+    const matchesArea = conversationFilters.value.area === "All areas" || conversation.area === conversationFilters.value.area;
+    const matchesAgent = conversationFilters.value.agent === "All agents" || conversation.agent === conversationFilters.value.agent;
+    const matchesStatus = conversationFilters.value.status === "All statuses" || conversation.status === conversationFilters.value.status;
+    const matchesFriction = conversationFilters.value.friction === "All friction" || conversation.friction === conversationFilters.value.friction;
+    return matchesTerm && matchesArea && matchesAgent && matchesStatus && matchesFriction;
+  });
+});
+const filteredAgents = computed(() => {
+  const term = agentSearch.value.toLowerCase().trim();
+  return agents.filter((agent) => {
+    const matchesTerm = !term || `${agent.name} ${agent.area} ${agent.type}`.toLowerCase().includes(term);
+    const matchesArea = agentFilters.value.area === "All areas" || agent.area === agentFilters.value.area;
+    const matchesStatus = agentFilters.value.status === "All statuses" || agent.status === agentFilters.value.status;
+    const matchesType = agentFilters.value.type === "All types" || agent.type === agentFilters.value.type;
+    return matchesTerm && matchesArea && matchesStatus && matchesType;
+  });
+});
+
+const goTo = (id: NavId) => {
+  activeNav.value = id;
+  route.value = id;
+  setPath(routePath(id));
+};
+const openClient = (clientId: string) => {
+  selectedClientId.value = clientId;
+  activeNav.value = "clients";
+  route.value = "client-detail";
+  setPath(routePath("client-detail", clientId));
+};
+const openClientConversations = (clientId: string) => {
+  selectedClientId.value = clientId;
+  activeNav.value = "clients";
+  route.value = "client-conversations";
+  setPath(routePath("client-conversations", clientId));
+};
+const openTranscript = (conversationId: string) => {
+  selectedConversationId.value = conversationId;
+  transcriptContext.value = activeNav.value === "clients" ? "clients" : "conversations";
+  if (transcriptContext.value === "clients") {
+    selectedClientId.value = conversations.find((conversation) => conversation.id === conversationId)?.clientId || selectedClientId.value;
+  }
+  route.value = "transcript";
+  setPath(routePath("transcript", conversationId));
+};
+const downloadTranscript = (conversationId: string) => {
+  const conversation = conversations.find((item) => item.id === conversationId);
+  if (!conversation) return;
+  const body = conversation.transcript.map((row) => `${row.timestamp} - ${row.speaker}: ${row.message}`).join("\n");
+  const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${conversation.client}-${conversation.agent}-transcript.txt`.replace(/[^a-z0-9.-]+/gi, "-").toLowerCase();
+  link.click();
+  URL.revokeObjectURL(url);
+};
+const areaClass = (area: Area) => `area-chip--${area.toLowerCase()}`;
+const statusClass = (status: Status) => {
+  if (status === "Completed") return "status-chip--completed";
+  if (status === "In progress") return "status-chip--progress";
+  if (status === "Failed") return "status-chip--failed";
+  return "status-chip--new";
 };
 
-const loadUsersNow = async () => {
-  users.value = await api<UserRow[]>(`/api/users?days=${days.value}&search=${encodeURIComponent(search.value)}`);
-  if (!selectedUserId.value && users.value.length > 0) {
-    await selectUser(users.value[0].userId);
+const ConversationTable = defineComponent({
+  props: {
+    rows: { type: Array as () => Conversation[], required: true }
+  },
+  emits: ["transcript", "download"],
+  setup(props, { emit }) {
+    return () =>
+      h("div", { class: "table-wrap" }, [
+        h("table", [
+          h("thead", [
+            h("tr", [
+              h("th", "Client"),
+              h("th", "Agent"),
+              h("th", "Area"),
+              h("th", "Date"),
+              h("th", "Duration"),
+              h("th", "Status"),
+              h("th", "Friction"),
+              h("th", "Actions")
+            ])
+          ]),
+          h(
+            "tbody",
+            props.rows.map((row) =>
+              h("tr", { key: row.id }, [
+                h("td", row.client),
+                h("td", row.agent),
+                h("td", [h("span", { class: ["area-chip", areaClass(row.area)] }, row.area)]),
+                h("td", row.date),
+                h("td", row.duration),
+                h("td", [h("span", { class: ["status-chip", row.status === "Completed" ? "status-chip--completed" : row.status === "Failed" ? "status-chip--failed" : "status-chip--progress"] }, row.status)]),
+                h("td", [h("span", { class: ["friction", row.friction === "Yes" ? "friction--yes" : "friction--no"] }, row.friction)]),
+                h("td", { class: "actions-cell" }, [
+                  h("button", { class: "table-action", type: "button", onClick: () => emit("transcript", row.id) }, "View transcript"),
+                  h("button", { class: "table-action table-action--ghost", type: "button", onClick: () => emit("download", row.id) }, "Download")
+                ])
+              ])
+            )
+          )
+        ])
+      ]);
+  }
+});
+
+const routePath = (nextRoute: Route, id = "") => {
+  if (nextRoute === "client-detail") return `/clients/${id || selectedClientId.value}`;
+  if (nextRoute === "client-conversations") return `/clients/${id || selectedClientId.value}/conversations`;
+  if (nextRoute === "transcript") {
+    return transcriptContext.value === "clients"
+      ? `/clients/${selectedClientId.value}/conversations/${id || selectedConversationId.value}/transcript`
+      : `/conversations/${id || selectedConversationId.value}/transcript`;
+  }
+  return `/${nextRoute}`;
+};
+
+const setPath = (path: string) => {
+  window.history.pushState({}, "", path);
+};
+
+const signIn = () => {
+  isSignedIn.value = true;
+  route.value = "dashboard";
+  activeNav.value = "dashboard";
+  setPath("/dashboard");
+};
+
+const syncRouteFromPath = () => {
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  if (parts[0] === "sign-in" || parts.length === 0) {
+    isSignedIn.value = false;
+    route.value = "dashboard";
+    activeNav.value = "dashboard";
+    return;
+  }
+
+  isSignedIn.value = true;
+  if (parts[0] === "clients" && parts[1] && parts[2] === "conversations" && parts[3] && parts[4] === "transcript") {
+    selectedClientId.value = parts[1];
+    selectedConversationId.value = parts[3];
+    transcriptContext.value = "clients";
+    route.value = "transcript";
+    activeNav.value = "clients";
+    return;
+  }
+  if (parts[0] === "clients" && parts[1] && parts[2] === "conversations") {
+    selectedClientId.value = parts[1];
+    route.value = "client-conversations";
+    activeNav.value = "clients";
+    return;
+  }
+  if (parts[0] === "clients" && parts[1]) {
+    selectedClientId.value = parts[1];
+    route.value = "client-detail";
+    activeNav.value = "clients";
+    return;
+  }
+  if (parts[0] === "conversations" && parts[1] && parts[2] === "transcript") {
+    selectedConversationId.value = parts[1];
+    transcriptContext.value = "conversations";
+    route.value = "transcript";
+    activeNav.value = "conversations";
+    return;
+  }
+  if (["dashboard", "clients", "conversations", "agents", "insights", "settings"].includes(parts[0])) {
+    route.value = parts[0] as NavId;
+    activeNav.value = parts[0] as NavId;
   }
 };
 
-const loadUsers = () => {
-  window.clearTimeout(searchTimer);
-  searchTimer = window.setTimeout(loadUsersNow, 250);
-};
-
-const loadRecentAnswers = async () => {
-  recentAnswers.value = await api<AnswerRow[]>("/api/answers?limit=80");
-};
-
-const selectUser = async (userId: string) => {
-  selectedUserId.value = userId;
-  selectedUser.value = await api<UserDetail>(`/api/users/${encodeURIComponent(userId)}`);
-};
-
-const loadDashboard = async () => {
-  error.value = "";
-  try {
-    selectedUser.value = null;
-    selectedUserId.value = "";
-    await Promise.all([loadSummary(), loadUsersNow(), loadRecentAnswers()]);
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : "No se pudo cargar el dashboard";
-  }
-};
-
-const formatDate = (value: string | null) => {
-  if (!value) return "-";
-  return new Intl.DateTimeFormat("es-MX", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
-};
-
-const relativeWidth = <T extends Record<string, unknown>>(value: number, rows: T[], key: keyof T = "total") => {
-  const values = rows.map((item) => Number(item[key] || 0));
-  const max = Math.max(...values, 1);
-  return `${Math.max((value / max) * 100, value > 0 ? 8 : 4)}%`;
-};
-
-const initials = (value: string) => value.replace(/-/g, "").slice(0, 2).toUpperCase();
-const formatDevice = (value: string) => {
-  if (value === "web") return "Web";
-  if (value === "ios") return "Movil iOS";
-  if (value === "android") return "Movil Android";
-  return "Sin dispositivo";
-};
-
-onMounted(loadDashboard);
+onMounted(() => {
+  syncRouteFromPath();
+  window.addEventListener("popstate", syncRouteFromPath);
+});
 </script>
