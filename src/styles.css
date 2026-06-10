@@ -85,6 +85,39 @@ select:focus {
   box-shadow: 0 0 0 4px rgba(31, 111, 255, 0.12);
 }
 
+.form-error,
+.form-note,
+.data-alert {
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.form-error,
+.data-alert {
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  color: #be123c;
+}
+
+.form-note {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+}
+
+.data-alert {
+  margin-bottom: 16px;
+}
+
+.data-alert--loading {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
 .signin-footer {
   align-items: center;
   border-top: 1px solid #e6edf5;
@@ -632,6 +665,24 @@ th {
 .settings-grid .panel {
   display: grid;
   gap: 14px;
+}
+
+.admin-users-panel {
+  grid-column: 1 / -1;
+}
+
+.admin-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.admin-form .primary-action {
+  align-self: end;
+}
+
+.admin-users-table {
+  max-height: 360px;
 }
 
 .toggle-row {

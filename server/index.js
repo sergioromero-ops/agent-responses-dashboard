@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -18,6 +19,87 @@ const pool = process.env.DATABASE_URL
   : null;
 
 app.use(express.json());
+
+const authSecret = process.env.DASHBOARD_AUTH_SECRET || process.env.DATABASE_URL || "local-dashboard-secret";
+
+const base64url = (value) => Buffer.from(value).toString("base64url");
+const signPayload = (payload) =>
+  crypto.createHmac("sha256", authSecret).update(payload).digest("base64url");
+const createToken = (admin) => {
+  const payload = base64url(JSON.stringify({
+    sub: admin.id,
+    email: admin.email,
+    role: admin.role,
+    exp: Date.now() + 1000 * 60 * 60 * 12
+  }));
+  return `${payload}.${signPayload(payload)}`;
+};
+const verifyToken = (token) => {
+  try {
+    if (!token || !token.includes(".")) return null;
+    const [payload, signature] = token.split(".");
+    const expected = signPayload(payload);
+    if (signature.length !== expected.length) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!parsed.exp || parsed.exp < Date.now()) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+const hashPassword = (password, salt = crypto.randomBytes(16).toString("hex")) => ({
+  salt,
+  hash: crypto.pbkdf2Sync(password, salt, 310000, 32, "sha256").toString("hex")
+});
+const passwordMatches = (password, salt, hash) => {
+  const candidate = hashPassword(password, salt).hash;
+  if (candidate.length !== hash.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(candidate, "hex"), Buffer.from(hash, "hex"));
+};
+const randomPassword = () => crypto.randomBytes(9).toString("base64url");
+
+const ensureAdminTable = async () => {
+  if (!pool) return;
+  await pool.query("create schema if not exists internal");
+  await pool.query(`
+    create table if not exists internal.dashboard_admin_users (
+      id uuid primary key,
+      name text not null,
+      email text not null unique,
+      role text not null default 'Administrator',
+      password_hash text not null,
+      password_salt text not null,
+      must_reset_password boolean not null default false,
+      is_active boolean not null default true,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+  const count = await pool.query("select count(*)::int as total from internal.dashboard_admin_users where is_active = true");
+  if (count.rows[0].total === 0) {
+    const password = process.env.DASHBOARD_ADMIN_PASSWORD || "admin123";
+    const { salt, hash } = hashPassword(password);
+    await pool.query(
+      `
+        insert into internal.dashboard_admin_users (id, name, email, role, password_hash, password_salt)
+        values ($1, $2, $3, $4, $5, $6)
+      `,
+      [crypto.randomUUID(), "Pigui Admin", "admin@pigui.ai", "Administrator", hash, salt]
+    );
+  }
+};
+
+const requireAuth = (req, res, next) => {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const session = verifyToken(token);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  req.admin = session;
+  next();
+};
 
 const tableExists = async (tableName) => {
   if (!pool) return false;
@@ -70,6 +152,179 @@ app.get("/api/health", async (_req, res) => {
 
   res.json({ ok: true, databaseConfigured: hasDb, databaseConnected: connected });
 });
+
+app.post("/api/auth/sign-in", async (req, res, next) => {
+  if (!requireDb(res)) return;
+
+  try {
+    await ensureAdminTable();
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+    const result = await pool.query(
+      `
+        select id::text, name, email, role, password_hash, password_salt, must_reset_password
+        from internal.dashboard_admin_users
+        where lower(email) = $1 and is_active = true
+        limit 1
+      `,
+      [email]
+    );
+    const admin = result.rows[0];
+    if (!admin || !passwordMatches(password, admin.password_salt, admin.password_hash)) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+    res.json({
+      token: createToken(admin),
+      admin: {
+        id: admin.id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        mustResetPassword: admin.must_reset_password
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/admin/me", requireAuth, async (req, res, next) => {
+  if (!requireDb(res)) return;
+
+  try {
+    await ensureAdminTable();
+    const result = await pool.query(
+      `
+        select id::text, name, email, role
+        from internal.dashboard_admin_users
+        where id::text = $1 and is_active = true
+      `,
+      [req.admin.sub]
+    );
+    if (!result.rows[0]) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/admin/users", requireAuth, async (_req, res, next) => {
+  if (!requireDb(res)) return;
+
+  try {
+    await ensureAdminTable();
+    const result = await pool.query(
+      `
+        select id::text, name, email, role, must_reset_password, is_active, created_at, updated_at
+        from internal.dashboard_admin_users
+        order by created_at desc
+      `
+    );
+    res.json(result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      role: row.role,
+      mustResetPassword: row.must_reset_password,
+      isActive: row.is_active,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/admin/users", requireAuth, async (req, res, next) => {
+  if (!requireDb(res)) return;
+
+  try {
+    await ensureAdminTable();
+    const name = String(req.body.name || "").trim();
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const role = String(req.body.role || "Viewer").trim();
+    const temporaryPassword = String(req.body.password || randomPassword());
+    if (!name || !email || !temporaryPassword) {
+      res.status(400).json({ error: "Name, email and password are required" });
+      return;
+    }
+    const { salt, hash } = hashPassword(temporaryPassword);
+    const result = await pool.query(
+      `
+        insert into internal.dashboard_admin_users (id, name, email, role, password_hash, password_salt, must_reset_password)
+        values ($1, $2, $3, $4, $5, $6, true)
+        returning id::text, name, email, role, must_reset_password, is_active, created_at, updated_at
+      `,
+      [crypto.randomUUID(), name, email, role, hash, salt]
+    );
+    const row = result.rows[0];
+    res.status(201).json({
+      user: {
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        mustResetPassword: row.must_reset_password,
+        isActive: row.is_active,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      },
+      temporaryPassword
+    });
+  } catch (error) {
+    if (error.code === "23505") {
+      res.status(409).json({ error: "Admin user already exists" });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.post("/api/admin/users/:id/reset-password", requireAuth, async (req, res, next) => {
+  if (!requireDb(res)) return;
+
+  try {
+    await ensureAdminTable();
+    const temporaryPassword = String(req.body.password || randomPassword());
+    const { salt, hash } = hashPassword(temporaryPassword);
+    const result = await pool.query(
+      `
+        update internal.dashboard_admin_users
+        set password_hash = $2,
+            password_salt = $3,
+            must_reset_password = true,
+            updated_at = now()
+        where id::text = $1 and is_active = true
+        returning id::text, name, email, role, must_reset_password, is_active, updated_at
+      `,
+      [req.params.id, hash, salt]
+    );
+    if (!result.rows[0]) {
+      res.status(404).json({ error: "Admin user not found" });
+      return;
+    }
+    res.json({
+      user: {
+        id: result.rows[0].id,
+        name: result.rows[0].name,
+        email: result.rows[0].email,
+        role: result.rows[0].role,
+        mustResetPassword: result.rows[0].must_reset_password,
+        isActive: result.rows[0].is_active,
+        updatedAt: result.rows[0].updated_at
+      },
+      temporaryPassword
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use("/api", requireAuth);
 
 app.get("/api/summary", async (req, res, next) => {
   if (!requireDb(res)) return;

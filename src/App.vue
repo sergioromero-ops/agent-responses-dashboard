@@ -11,6 +11,7 @@
         Password
         <input v-model="signInPassword" type="password" autocomplete="current-password" />
       </label>
+      <p v-if="authError" class="form-error">{{ authError }}</p>
       <button class="primary-action" type="button" @click="signIn">Sign in</button>
       <button class="link-action" type="button">Forgot password?</button>
       <div class="signin-footer">
@@ -66,6 +67,9 @@
           </select>
         </label>
       </header>
+
+      <div v-if="dashboardError" class="data-alert">{{ dashboardError }}</div>
+      <div v-else-if="isLoadingData" class="data-alert data-alert--loading">Loading production data...</div>
 
       <section v-if="route === 'dashboard'" class="page-stack">
         <section class="panel">
@@ -324,7 +328,32 @@
           <label>Name<input v-model="settings.adminName" /></label>
           <label>Email<input v-model="settings.adminEmail" /></label>
           <label>Role<input v-model="settings.adminRole" /></label>
-          <button class="secondary-action" type="button">Reset password</button>
+          <button class="secondary-action" type="button" @click="resetAdminPassword(authAdminId)">Reset my password</button>
+          <p v-if="adminNotice" class="form-note">{{ adminNotice }}</p>
+        </section>
+        <section class="panel admin-users-panel">
+          <h2>Admin Users</h2>
+          <div class="admin-form">
+            <label>Name<input v-model="newAdmin.name" placeholder="Full name" /></label>
+            <label>Email<input v-model="newAdmin.email" type="email" placeholder="admin@pigui.ai" /></label>
+            <label>Role<select v-model="newAdmin.role"><option>Administrator</option><option>Editor</option><option>Viewer</option></select></label>
+            <label>Temporary password<input v-model="newAdmin.password" type="text" placeholder="Leave empty to generate" /></label>
+            <button class="primary-action" type="button" @click="createAdminUser">Create user</button>
+          </div>
+          <div class="table-wrap admin-users-table">
+            <table>
+              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>
+                <tr v-for="admin in adminUsers" :key="admin.id">
+                  <td>{{ admin.name }}</td>
+                  <td>{{ admin.email }}</td>
+                  <td>{{ admin.role }}</td>
+                  <td><span class="status-chip" :class="admin.isActive ? 'status-chip--completed' : 'status-chip--failed'">{{ admin.isActive ? 'Active' : 'Inactive' }}</span></td>
+                  <td><button class="table-action" type="button" @click="resetAdminPassword(admin.id)">Reset password</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
         <section class="panel">
           <h2>Dashboard Preferences</h2>
@@ -356,7 +385,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref } from "vue";
+import { computed, defineComponent, h, onMounted, ref, watch } from "vue";
 
 type NavId = "dashboard" | "clients" | "conversations" | "agents" | "insights" | "settings";
 type Route = NavId | "client-detail" | "client-conversations" | "transcript";
@@ -407,6 +436,16 @@ type Conversation = {
   friction: "Yes" | "No";
   transcript: TranscriptRow[];
 };
+type AdminUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  mustResetPassword: boolean;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 const isSignedIn = ref(false);
 const signInEmail = ref("admin@pigui.ai");
@@ -414,12 +453,33 @@ const signInPassword = ref("");
 const route = ref<Route>("dashboard");
 const activeNav = ref<NavId>("dashboard");
 const selectedRange = ref("Last 30 days");
-const selectedClientId = ref("sergio-romero");
+const selectedClientId = ref("");
 const selectedConversationId = ref("");
 const transcriptContext = ref<"clients" | "conversations">("conversations");
 const clientSearch = ref("");
 const conversationSearch = ref("");
 const agentSearch = ref("");
+const isLoadingData = ref(false);
+const dashboardError = ref("");
+const authToken = ref(localStorage.getItem("pigui_dashboard_token") || "");
+const authError = ref("");
+const adminUsers = ref<AdminUser[]>([]);
+const adminNotice = ref("");
+const newAdmin = ref({ name: "", email: "", role: "Viewer", password: "" });
+const apiSummary = ref({
+  users: 0,
+  sessions: 0,
+  completedSessions: 0,
+  answers: 0,
+  avgAnswersPerSession: 0,
+  recommendationEvents: 0,
+  acceptedRecommendations: 0,
+  webUsers: 0,
+  mobileUsers: 0,
+  b2bUsers: 0,
+  b2cUsers: 0,
+  b2oUsers: 0
+});
 const conversationFilters = ref({ area: "All areas", agent: "All agents", status: "All statuses", friction: "All friction" });
 const agentFilters = ref({ area: "All areas", status: "All statuses", type: "All types" });
 const dateRanges = ["Last 7 days", "Last 30 days", "Last 90 days", "Last 12 months", "Custom"];
@@ -462,61 +522,21 @@ const copy = computed(() => {
 
 const label = (id: NavId) => copy.value[id];
 
-const agents: Agent[] = [
-  { id: "website", step: "01", name: "Website Agent", area: "Web", status: "Active", type: "Commercial", clientsWithActivity: 430, conversations: 430, lastActivity: "Today, 10:42", purpose: "Captures website visitor and prospect conversations." },
-  { id: "baseline-b2b", step: "02", name: "Personal & Business Baseline Agent", area: "B2B", status: "Active", type: "Baseline", clientsWithActivity: 357, conversations: 357, lastActivity: "Today, 10:15", purpose: "Gets to know the user and the business inside Pigui Business." },
-  { id: "onboarding-feedback", step: "03", name: "Onboarding Feedback Agent", area: "B2B", status: "Active", type: "Feedback", clientsWithActivity: 271, conversations: 271, lastActivity: "Today, 09:58", purpose: "Captures feedback after onboarding." },
-  { id: "branch", step: "04", name: "Operative Branch Agent", area: "B2B", status: "Active", type: "Operative", clientsWithActivity: 184, conversations: 184, lastActivity: "Today, 09:40", purpose: "Supports operational branch-related questions." },
-  { id: "financial", step: "05", name: "Dashboard Financial Agent", area: "B2B", status: "Active", type: "Financial", clientsWithActivity: 112, conversations: 112, lastActivity: "Today, 09:22", purpose: "Helps users understand numbers, financial metrics, and dashboard data." },
-  { id: "consumer-baseline", step: "06", name: "Consumer Baseline Agent", area: "B2C", status: "Active", type: "Consumer", clientsWithActivity: 92, conversations: 92, lastActivity: "Yesterday, 18:10", purpose: "Gets to know the consumer inside Pigui Rewards." },
-  { id: "rewards-feedback", step: "07", name: "Rewards Feedback Agent", area: "B2C", status: "Active", type: "Feedback", clientsWithActivity: 76, conversations: 76, lastActivity: "Yesterday, 17:42", purpose: "Captures feedback about the Pigui Rewards experience." },
-  { id: "scan-feedback", step: "08", name: "Scan Feedback Agent", area: "B2O", status: "Active", type: "Feedback", clientsWithActivity: 64, conversations: 64, lastActivity: "Yesterday, 16:55", purpose: "Captures feedback about the Pigui Scan experience." },
-  { id: "feedback-overview", step: "09", name: "Feedback Overview Agent", area: "B2B", status: "Active", type: "Feedback", clientsWithActivity: 64, conversations: 64, lastActivity: "Yesterday, 16:20", purpose: "Captures final feedback after Business, Rewards, and Scan." }
+const agentCatalog: Agent[] = [
+  { id: "website", step: "01", name: "Website Agent", area: "Web", status: "Active", type: "Commercial", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Captures website visitor and prospect conversations." },
+  { id: "baseline-b2b", step: "02", name: "Personal & Business Baseline Agent", area: "B2B", status: "Active", type: "Baseline", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Gets to know the user and the business inside Pigui Business." },
+  { id: "onboarding-feedback", step: "03", name: "Onboarding Feedback Agent", area: "B2B", status: "Active", type: "Feedback", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Captures feedback after onboarding." },
+  { id: "branch", step: "04", name: "Operative Branch Agent", area: "B2B", status: "Active", type: "Operative", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Supports operational branch-related questions." },
+  { id: "financial", step: "05", name: "Dashboard Financial Agent", area: "B2B", status: "Active", type: "Financial", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Helps users understand numbers, financial metrics, and dashboard data." },
+  { id: "consumer-baseline", step: "06", name: "Consumer Baseline Agent", area: "B2C", status: "Active", type: "Consumer", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Gets to know the consumer inside Pigui Rewards." },
+  { id: "rewards-feedback", step: "07", name: "Rewards Feedback Agent", area: "B2C", status: "Active", type: "Feedback", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Captures feedback about the Pigui Rewards experience." },
+  { id: "scan-feedback", step: "08", name: "Scan Feedback Agent", area: "B2O", status: "Active", type: "Feedback", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Captures feedback about the Pigui Scan experience." },
+  { id: "feedback-overview", step: "09", name: "Feedback Overview Agent", area: "B2B", status: "Active", type: "Feedback", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Captures final feedback after Business, Rewards, and Scan." }
 ];
 
-const clients: Client[] = [
-  { id: "sergio-romero", name: "Sergio Romero", email: "sergio.romero@acme.com", phone: "+52 55 1234 5678", country: "Mexico", state: "Mexico City", city: "Mexico City", interactions: 128, journey: "9/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "08 Jun 2026, 10:24", status: "Completed", piguiBusinessId: "PB-1001", piguiScanId: "PS-4301", piguiRewardsId: "PR-9001" },
-  { id: "ana-torres", name: "Ana Torres", email: "ana.torres@northstar.com", phone: "+1 512 555 0102", country: "United States", state: "Texas", city: "Austin", interactions: 86, journey: "7/9", lastAgent: "Rewards Feedback Agent", lastActivity: "Today, 10:42", status: "In progress", piguiBusinessId: "PB-1002", piguiScanId: "PS-4302", piguiRewardsId: "PR-9002" },
-  { id: "carlos-mendez", name: "Carlos Mendez", email: "carlos.mendez@local.mx", phone: "+52 81 5555 1234", country: "Mexico", state: "Nuevo Leon", city: "Monterrey", interactions: 74, journey: "6/9", lastAgent: "Consumer Baseline Agent", lastActivity: "Today, 09:58", status: "In progress", piguiBusinessId: "PB-1003", piguiScanId: "PS-4303", piguiRewardsId: "PR-9003" },
-  { id: "mariana-lopez", name: "Mariana Lopez", email: "mariana.lopez@retail.co", phone: "+52 33 1234 9090", country: "Mexico", state: "Jalisco", city: "Guadalajara", interactions: 65, journey: "5/9", lastAgent: "Dashboard Financial Agent", lastActivity: "Yesterday, 18:10", status: "In progress", piguiBusinessId: "PB-1004", piguiScanId: "PS-4304", piguiRewardsId: "PR-9004" },
-  { id: "roberto-cruz", name: "Roberto Cruz", email: "roberto.cruz@services.io", phone: "+1 312 555 0144", country: "United States", state: "Illinois", city: "Chicago", interactions: 54, journey: "3/9", lastAgent: "Onboarding Feedback Agent", lastActivity: "Yesterday, 16:55", status: "New", piguiBusinessId: "PB-1005", piguiScanId: "PS-4305", piguiRewardsId: "PR-9005" },
-  { id: "sofia-herrera", name: "Sofia Herrera", email: "sofia.herrera@coffee.us", phone: "+1 602 555 0182", country: "United States", state: "Arizona", city: "Phoenix", interactions: 92, journey: "9/9", lastAgent: "Feedback Overview Agent", lastActivity: "07 Jun 2026, 14:08", status: "Completed", piguiBusinessId: "PB-1006", piguiScanId: "PS-4306", piguiRewardsId: "PR-9006" },
-  { id: "diego-martinez", name: "Diego Martinez", email: "diego.martinez@growth.ai", phone: "+52 55 9988 2211", country: "Mexico", state: "Mexico City", city: "Mexico City", interactions: 49, journey: "4/9", lastAgent: "Operative Branch Agent", lastActivity: "06 Jun 2026, 11:21", status: "In progress", piguiBusinessId: "PB-1007", piguiScanId: "PS-4307", piguiRewardsId: "PR-9007" },
-  { id: "laura-jimenez", name: "Laura Jimenez", email: "laura.jimenez@wellness.com", phone: "+1 415 555 0198", country: "United States", state: "California", city: "San Francisco", interactions: 43, journey: "2/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "05 Jun 2026, 09:18", status: "New", piguiBusinessId: "PB-1008", piguiScanId: "PS-4308", piguiRewardsId: "PR-9008" },
-  { id: "jorge-ramirez", name: "Jorge Ramirez", email: "jorge.ramirez@market.mx", phone: "+52 55 4488 7711", country: "Mexico", state: "Puebla", city: "Puebla", interactions: 38, journey: "8/9", lastAgent: "Scan Feedback Agent", lastActivity: "04 Jun 2026, 17:40", status: "In progress", piguiBusinessId: "PB-1009", piguiScanId: "PS-4309", piguiRewardsId: "PR-9009" },
-  { id: "paola-sanchez", name: "Paola Sanchez", email: "paola.sanchez@beauty.mx", phone: "+52 33 8877 2211", country: "Mexico", state: "Jalisco", city: "Zapopan", interactions: 31, journey: "1/9", lastAgent: "Website Agent", lastActivity: "02 Jun 2026, 12:33", status: "New", piguiBusinessId: "PB-1010", piguiScanId: "PS-4310", piguiRewardsId: "PR-9010" }
-];
-
-const transcriptSeed = (client: string): TranscriptRow[] => [
-  { timestamp: "00:00", speaker: "Pigui", message: `Hello ${client}, thanks for your time. I will ask a few quick questions to understand your experience.` },
-  { timestamp: "00:28", speaker: client, message: "Hi, I am evaluating Pigui for my business and want to understand how it helps customers." },
-  { timestamp: "01:02", speaker: "Pigui", message: "Thank you. What part of the experience felt clearest so far?" },
-  { timestamp: "01:38", speaker: client, message: "The dashboard is clear, but I needed more guidance after scanning the QR." },
-  { timestamp: "02:14", speaker: "Pigui", message: "That is helpful feedback. I will take that into account for the product team." }
-];
-
-const conversations: Conversation[] = clients.flatMap((client, index) =>
-  agents.slice(0, Math.min(9, index % 9 + 1)).map((agent, agentIndex) => ({
-    id: `${client.id}-${agent.id}`,
-    clientId: client.id,
-    client: client.name,
-    agent: agent.name,
-    area: agent.area,
-    date: agentIndex % 2 === 0 ? "08 Jun 2026, 10:24" : "Today, 10:42",
-    duration: `${Math.max(2, agentIndex + 2)}m ${String((agentIndex + 1) * 7).padStart(2, "0")}s`,
-    status: agentIndex % 8 === 0 && index > 4 ? "In progress" : "Completed",
-    friction: (agentIndex + index) % 4 === 0 ? "Yes" : "No",
-    transcript: transcriptSeed(client.name)
-  }))
-);
-
-const insights = [
-  { id: "i1", type: "Finding", insight: "B2B concentrates most conversation activity.", area: "B2B" as Area, sourceAgent: "Personal & Business Baseline Agent", relatedClients: 127, priority: "Medium", date: "08 Jun 2026" },
-  { id: "i2", type: "Friction", insight: "Some customers do not understand why baseline questions are needed.", area: "B2B" as Area, sourceAgent: "Onboarding Feedback Agent", relatedClients: 42, priority: "High", date: "08 Jun 2026" },
-  { id: "i3", type: "Opportunity", insight: "Improve the transition from Pigui Business to Pigui Scan.", area: "B2O" as Area, sourceAgent: "Scan Feedback Agent", relatedClients: 36, priority: "Medium", date: "07 Jun 2026" },
-  { id: "i4", type: "Friction", insight: "Rewards redemption flow needs clearer explanation.", area: "B2C" as Area, sourceAgent: "Rewards Feedback Agent", relatedClients: 29, priority: "High", date: "07 Jun 2026" },
-  { id: "i5", type: "Finding", insight: "Feedback Overview helps consolidate signals from Business, Scan and Rewards.", area: "B2B" as Area, sourceAgent: "Feedback Overview Agent", relatedClients: 64, priority: "Low", date: "06 Jun 2026" }
-];
+const clients = ref<Client[]>([]);
+const conversations = ref<Conversation[]>([]);
+const insights = ref<Array<{ id: string; type: string; insight: string; area: Area; sourceAgent: string; relatedClients: number; priority: string; date: string }>>([]);
 
 const integrations = [
   { name: "Internal database", description: "Stores clients, conversations, agents, transcripts and metrics." },
@@ -524,9 +544,238 @@ const integrations = [
   { name: "Machine Learning Layer", description: "Receives structured conversation data for global learning." }
 ];
 
-const selectedClient = computed(() => clients.find((client) => client.id === selectedClientId.value));
-const selectedConversation = computed(() => conversations.find((conversation) => conversation.id === selectedConversationId.value));
-const selectedClientConversations = computed(() => conversations.filter((conversation) => conversation.clientId === selectedClientId.value));
+const formatNumber = (value: number) => value.toLocaleString("en-US");
+const formatDate = (value?: string) => {
+  if (!value) return "No activity";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+};
+const daysFromRange = () => {
+  if (selectedRange.value === "Last 7 days") return 7;
+  if (selectedRange.value === "Last 90 days") return 90;
+  if (selectedRange.value === "Last 12 months") return 365;
+  return 30;
+};
+const apiGet = async <T,>(path: string): Promise<T> => {
+  const response = await fetch(path, {
+    headers: authToken.value ? { Authorization: `Bearer ${authToken.value}` } : {}
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.detail || body.error || `API request failed: ${path}`);
+  }
+  return body as T;
+};
+const apiPost = async <T,>(path: string, payload: unknown): Promise<T> => {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(authToken.value ? { Authorization: `Bearer ${authToken.value}` } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.detail || body.error || `API request failed: ${path}`);
+  }
+  return body as T;
+};
+const inferAgent = (text = "") => {
+  const normalized = text.toLowerCase();
+  if (normalized.includes("reward") && normalized.includes("feedback")) return agentCatalog[6];
+  if (normalized.includes("consumer") || normalized.includes("reward")) return agentCatalog[5];
+  if (normalized.includes("scan") || normalized.includes("qr")) return agentCatalog[7];
+  if (normalized.includes("financial") || normalized.includes("dashboard")) return agentCatalog[4];
+  if (normalized.includes("branch") || normalized.includes("operative")) return agentCatalog[3];
+  if (normalized.includes("feedback") || normalized.includes("friction") || normalized.includes("confus")) return agentCatalog[2];
+  if (normalized.includes("website") || normalized.includes("web")) return agentCatalog[0];
+  return agentCatalog[1];
+};
+const buildTranscript = (answers: Array<{ question?: string; answer?: string; order?: number }>, clientName: string): TranscriptRow[] =>
+  answers.flatMap((answer, index) => {
+    const timestamp = String(index + 1).padStart(2, "0");
+    return [
+      { timestamp: `${timestamp}:00`, speaker: "Pigui", message: answer.question || "Question not available" },
+      { timestamp: `${timestamp}:30`, speaker: clientName, message: answer.answer || "No answer captured" }
+    ];
+  });
+const containsFriction = (text: string) => /confus|difficult|hard|slow|bug|error|issue|problem|friction|unclear|no entend|dif[ií]cil|lento/i.test(text);
+const mapStatus = (status?: string): Conversation["status"] => {
+  if (status === "completed") return "Completed";
+  if (status === "failed") return "Failed";
+  return "In progress";
+};
+const mergeClientConversations = (clientId: string, nextConversations: Conversation[]) => {
+  conversations.value = [
+    ...conversations.value.filter((conversation) => conversation.clientId !== clientId),
+    ...nextConversations
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+};
+const loadClientDetail = async (clientId: string) => {
+  if (!clientId || conversations.value.some((conversation) => conversation.clientId === clientId)) return;
+  const detail = await apiGet<{
+    profile?: { displayName?: string; email?: string };
+    sessions: Array<{ id: string; status?: string; answersCount: number; updatedAt?: string; createdAt?: string }>;
+    answers: Array<{ sessionId: string; question?: string; answer?: string; block?: string; questionId?: string; order?: number; updatedAt?: string }>;
+  }>(`/api/users/${clientId}`);
+  const client = clients.value.find((item) => item.id === clientId);
+  const clientName = client?.name || detail.profile?.displayName || detail.profile?.email || clientId;
+  const nextConversations = detail.sessions.map((session) => {
+    const sessionAnswers = detail.answers
+      .filter((answer) => answer.sessionId === session.id)
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    const firstAnswer = sessionAnswers[0];
+    const text = sessionAnswers.map((answer) => `${answer.block || ""} ${answer.question || ""} ${answer.answer || ""}`).join(" ");
+    const agent = inferAgent(`${firstAnswer?.block || ""} ${firstAnswer?.questionId || ""} ${text}`);
+    return {
+      id: session.id,
+      clientId,
+      client: clientName,
+      agent: agent.name,
+      area: agent.area,
+      date: formatDate(session.updatedAt || session.createdAt),
+      duration: `${Math.max(1, session.answersCount)} answers`,
+      status: mapStatus(session.status),
+      friction: containsFriction(text) ? "Yes" : "No",
+      transcript: buildTranscript(sessionAnswers, clientName)
+    } satisfies Conversation;
+  });
+  mergeClientConversations(clientId, nextConversations);
+};
+const buildInsights = () => {
+  const frictionConversations = conversations.value.filter((conversation) => conversation.friction === "Yes");
+  const areaCounts = conversations.value.reduce<Record<string, number>>((acc, conversation) => {
+    acc[conversation.area] = (acc[conversation.area] || 0) + 1;
+    return acc;
+  }, {});
+  const topArea = Object.entries(areaCounts).sort((a, b) => b[1] - a[1])[0];
+  insights.value = [
+    ...(topArea ? [{
+      id: "area-concentration",
+      type: "Finding",
+      insight: `${topArea[0]} concentrates the highest conversation activity in the selected period.`,
+      area: topArea[0] as Area,
+      sourceAgent: "Internal database",
+      relatedClients: clients.value.length,
+      priority: "Medium",
+      date: formatDate(new Date().toISOString())
+    }] : []),
+    ...(frictionConversations.length ? [{
+      id: "friction-signals",
+      type: "Friction",
+      insight: `${frictionConversations.length} conversations include possible confusion, bug, friction or difficulty signals.`,
+      area: frictionConversations[0].area,
+      sourceAgent: frictionConversations[0].agent,
+      relatedClients: new Set(frictionConversations.map((conversation) => conversation.clientId)).size,
+      priority: "High",
+      date: frictionConversations[0].date
+    }] : []),
+    {
+      id: "recommendation-events",
+      type: "Finding",
+      insight: `${formatNumber(apiSummary.value.recommendationEvents)} recommendation events and ${formatNumber(apiSummary.value.acceptedRecommendations)} accepted recommendations are recorded.`,
+      area: "B2B",
+      sourceAgent: "AI Feedback",
+      relatedClients: apiSummary.value.users,
+      priority: "Low",
+      date: formatDate(new Date().toISOString())
+    }
+  ];
+};
+const loadAdminUsers = async () => {
+  adminUsers.value = await apiGet<AdminUser[]>("/api/admin/users");
+};
+const createAdminUser = async () => {
+  adminNotice.value = "";
+  try {
+    const result = await apiPost<{ user: AdminUser; temporaryPassword: string }>("/api/admin/users", newAdmin.value);
+    adminNotice.value = `User created. Temporary password: ${result.temporaryPassword}`;
+    newAdmin.value = { name: "", email: "", role: "Viewer", password: "" };
+    await loadAdminUsers();
+  } catch (error) {
+    adminNotice.value = error instanceof Error ? error.message : "Could not create user.";
+  }
+};
+const resetAdminPassword = async (adminId: string) => {
+  if (!adminId) return;
+  adminNotice.value = "";
+  try {
+    const result = await apiPost<{ user: AdminUser; temporaryPassword: string }>(`/api/admin/users/${adminId}/reset-password`, {});
+    adminNotice.value = `Temporary password for ${result.user.email}: ${result.temporaryPassword}`;
+    await loadAdminUsers();
+  } catch (error) {
+    adminNotice.value = error instanceof Error ? error.message : "Could not reset password.";
+  }
+};
+const loadProductionData = async () => {
+  isLoadingData.value = true;
+  dashboardError.value = "";
+  try {
+    const days = daysFromRange();
+    const [summary, users] = await Promise.all([
+      apiGet<typeof apiSummary.value>(`/api/summary?days=${days}`),
+      apiGet<Array<{
+        userId: string;
+        sessions: number;
+        completedSessions: number;
+        answers: number;
+        lastActivityAt?: string;
+        displayName?: string;
+        email?: string;
+        phone?: string;
+        channel?: string;
+        deviceName?: string;
+        segment?: string;
+      }>>(`/api/users?days=${days}`)
+    ]);
+    apiSummary.value = summary;
+    clients.value = users.map((user) => {
+      const completed = user.completedSessions > 0;
+      return {
+        id: user.userId,
+        name: user.displayName || user.email || user.phone || user.userId,
+        email: user.email || "Unknown",
+        phone: user.phone || "Unknown",
+        country: user.segment || "Unknown",
+        state: user.channel || "Unknown",
+        city: user.deviceName || "Unknown",
+        interactions: user.answers,
+        journey: `${Math.min(9, Math.max(1, user.sessions || 1))}/9`,
+        lastAgent: "Personal & Business Baseline Agent",
+        lastActivity: formatDate(user.lastActivityAt),
+        status: completed ? "Completed" : user.sessions > 0 ? "In progress" : "New",
+        piguiBusinessId: user.userId,
+        piguiScanId: user.segment || "Unknown",
+        piguiRewardsId: user.channel || "Unknown"
+      };
+    });
+    if (!selectedClientId.value && clients.value[0]) selectedClientId.value = clients.value[0].id;
+    conversations.value = [];
+    await Promise.all(clients.value.slice(0, 25).map((client) => loadClientDetail(client.id)));
+    buildInsights();
+    await loadAdminUsers();
+  } catch (error) {
+    dashboardError.value = error instanceof Error ? error.message : "Could not load production data.";
+    clients.value = [];
+    conversations.value = [];
+    insights.value = [];
+  } finally {
+    isLoadingData.value = false;
+  }
+};
+
+const selectedClient = computed(() => clients.value.find((client) => client.id === selectedClientId.value));
+const selectedConversation = computed(() => conversations.value.find((conversation) => conversation.id === selectedConversationId.value));
+const selectedClientConversations = computed(() => conversations.value.filter((conversation) => conversation.clientId === selectedClientId.value));
+const authAdminId = computed(() => adminUsers.value.find((admin) => admin.email === settings.value.adminEmail)?.id || adminUsers.value[0]?.id || "");
 const showDateSelector = computed(() => route.value === "dashboard" || route.value === "conversations");
 const pageTitle = computed(() => {
   if (route.value === "client-detail") return selectedClient.value?.name || "Client";
@@ -535,54 +784,65 @@ const pageTitle = computed(() => {
   return label(activeNav.value);
 });
 
-const overviewMetrics = [
-  { title: "Website", value: "430", detail: "conversations · 1 agent", color: "web" },
-  { title: "Pigui Business", value: "310", detail: "conversations · 5 agents", color: "b2b" },
-  { title: "Pigui Scan", value: "120", detail: "conversations · 1 agent", color: "b2o" },
-  { title: "Pigui Rewards", value: "180", detail: "conversations · 2 agents", color: "b2c" },
-  { title: "Clients", value: "500", detail: "registered · Across the ecosystem" },
-  { title: "Pigui Agents", value: "9", detail: "active · Across the ecosystem" },
-  { title: "Conversations", value: "4,820", detail: "transcripts · Generated in this period" },
-  { title: "Completed Journey", value: "64", detail: "successful · Across the ecosystem" }
-];
-const clientMetrics = [
-  { title: "Clients", value: "500", detail: "Total registered clients" },
-  { title: "Active clients", value: "376", detail: "Clients with recent activity" },
-  { title: "Clients with completed journey", value: "64", detail: "Completed all 9 stages" },
-  { title: "Total interactions", value: "4,820", detail: "Total activity in this period" }
-];
-const conversationMetrics = [
-  { title: "Conversations", value: "4,820", detail: "Generated in this period" },
-  { title: "Clients with conversations", value: "376", detail: "With at least one interaction" },
-  { title: "Completed conversations", value: "4,215", detail: "Closed correctly" },
-  { title: "Conversations with friction", value: "244", detail: "With detected friction signals" }
-];
-const agentMetrics = [
-  { title: "Total agents", value: "9", detail: "Available across the ecosystem" },
-  { title: "Active agents", value: "9", detail: "Currently active" },
-  { title: "Conversations", value: "4,820", detail: "Generated in this period" },
-  { title: "Clients with activity", value: "500", detail: "With agent interaction" }
-];
-const insightMetrics = [
-  { title: "Insights detected", value: "128", detail: "Generated from conversations" },
-  { title: "Frictions detected", value: "42", detail: "Issues or confusion signals" },
-  { title: "Opportunities detected", value: "36", detail: "Product or growth opportunities" },
-  { title: "Clients impacted", value: "89", detail: "Related to detected insights" }
-];
-const insightBlocks = [
-  { title: "Key findings", items: ["B2B concentrates most conversation activity.", "Customers understand Pigui better after reviewing the Dashboard.", "Users who complete Rewards Feedback are more likely to reach Feedback Overview."] },
-  { title: "Detected frictions", items: ["Users report confusion between Dashboard and app installation.", "Rewards redemption flow needs clearer explanation.", "Scan users report uncertainty around camera permissions."] },
-  { title: "Opportunities", items: ["Improve the transition from Pigui Business to Pigui Scan.", "Create a short explanation before the Consumer Baseline.", "Add proactive guidance when users repeat the same question."] }
-];
+const agents = computed<Agent[]>(() =>
+  agentCatalog.map((agent) => {
+    const agentConversations = conversations.value.filter((conversation) => conversation.agent === agent.name);
+    return {
+      ...agent,
+      conversations: agentConversations.length,
+      clientsWithActivity: new Set(agentConversations.map((conversation) => conversation.clientId)).size,
+      lastActivity: agentConversations[0]?.date || "No activity"
+    };
+  })
+);
+const overviewMetrics = computed(() => [
+  { title: "Website", value: formatNumber(apiSummary.value.webUsers), detail: "users · Web activity", color: "web" },
+  { title: "Pigui Business", value: formatNumber(apiSummary.value.b2bUsers), detail: "users · B2B segment", color: "b2b" },
+  { title: "Pigui Scan", value: formatNumber(apiSummary.value.b2oUsers), detail: "users · B2O segment", color: "b2o" },
+  { title: "Pigui Rewards", value: formatNumber(apiSummary.value.b2cUsers), detail: "users · B2C segment", color: "b2c" },
+  { title: "Clients", value: formatNumber(apiSummary.value.users), detail: "active in selected period" },
+  { title: "Pigui Agents", value: formatNumber(agentCatalog.length), detail: "active · Across the ecosystem" },
+  { title: "Conversations", value: formatNumber(apiSummary.value.sessions), detail: "sessions · Generated in this period" },
+  { title: "Completed Sessions", value: formatNumber(apiSummary.value.completedSessions), detail: "completed · Across the ecosystem" }
+]);
+const clientMetrics = computed(() => [
+  { title: "Clients", value: formatNumber(apiSummary.value.users), detail: "Active users in selected period" },
+  { title: "Active clients", value: formatNumber(clients.value.length), detail: "Loaded from production database" },
+  { title: "Completed sessions", value: formatNumber(apiSummary.value.completedSessions), detail: "Completed onboarding voice sessions" },
+  { title: "Total answers", value: formatNumber(apiSummary.value.answers), detail: "Answers captured in this period" }
+]);
+const conversationMetrics = computed(() => [
+  { title: "Conversations", value: formatNumber(apiSummary.value.sessions), detail: "Sessions generated in this period" },
+  { title: "Clients with conversations", value: formatNumber(apiSummary.value.users), detail: "With at least one interaction" },
+  { title: "Completed conversations", value: formatNumber(apiSummary.value.completedSessions), detail: "Closed correctly" },
+  { title: "Conversations with friction", value: formatNumber(conversations.value.filter((conversation) => conversation.friction === "Yes").length), detail: "With detected friction signals" }
+]);
+const agentMetrics = computed(() => [
+  { title: "Total agents", value: formatNumber(agentCatalog.length), detail: "Available across the ecosystem" },
+  { title: "Active agents", value: formatNumber(agents.value.filter((agent) => agent.conversations > 0).length), detail: "With loaded activity" },
+  { title: "Conversations", value: formatNumber(apiSummary.value.sessions), detail: "Generated in this period" },
+  { title: "Clients with activity", value: formatNumber(apiSummary.value.users), detail: "With agent interaction" }
+]);
+const insightMetrics = computed(() => [
+  { title: "Insights detected", value: formatNumber(insights.value.length), detail: "Generated from loaded conversations" },
+  { title: "Frictions detected", value: formatNumber(conversations.value.filter((conversation) => conversation.friction === "Yes").length), detail: "Issues or confusion signals" },
+  { title: "Recommendation events", value: formatNumber(apiSummary.value.recommendationEvents), detail: "AI recommendation records" },
+  { title: "Clients impacted", value: formatNumber(apiSummary.value.users), detail: "Related to detected insights" }
+]);
+const insightBlocks = computed(() => [
+  { title: "Key findings", items: insights.value.filter((insight) => insight.type === "Finding").map((insight) => insight.insight).slice(0, 3) },
+  { title: "Detected frictions", items: insights.value.filter((insight) => insight.type === "Friction").map((insight) => insight.insight).slice(0, 3) },
+  { title: "Opportunities", items: insights.value.filter((insight) => insight.type === "Opportunity").map((insight) => insight.insight).slice(0, 3) }
+].map((block) => ({ ...block, items: block.items.length ? block.items : ["No production signals loaded yet."] })));
 
 const filteredClients = computed(() => {
   const term = clientSearch.value.toLowerCase().trim();
-  if (!term) return clients;
-  return clients.filter((client) => `${client.name} ${client.email} ${client.phone}`.toLowerCase().includes(term));
+  if (!term) return clients.value;
+  return clients.value.filter((client) => `${client.name} ${client.email} ${client.phone}`.toLowerCase().includes(term));
 });
 const filteredConversations = computed(() => {
   const term = conversationSearch.value.toLowerCase().trim();
-  return conversations.filter((conversation) => {
+  return conversations.value.filter((conversation) => {
     const matchesTerm = !term || `${conversation.client} ${conversation.agent} ${conversation.area} ${conversation.transcript.map((row) => row.message).join(" ")}`.toLowerCase().includes(term);
     const matchesArea = conversationFilters.value.area === "All areas" || conversation.area === conversationFilters.value.area;
     const matchesAgent = conversationFilters.value.agent === "All agents" || conversation.agent === conversationFilters.value.agent;
@@ -593,7 +853,7 @@ const filteredConversations = computed(() => {
 });
 const filteredAgents = computed(() => {
   const term = agentSearch.value.toLowerCase().trim();
-  return agents.filter((agent) => {
+  return agents.value.filter((agent) => {
     const matchesTerm = !term || `${agent.name} ${agent.area} ${agent.type}`.toLowerCase().includes(term);
     const matchesArea = agentFilters.value.area === "All areas" || agent.area === agentFilters.value.area;
     const matchesStatus = agentFilters.value.status === "All statuses" || agent.status === agentFilters.value.status;
@@ -612,24 +872,26 @@ const openClient = (clientId: string) => {
   activeNav.value = "clients";
   route.value = "client-detail";
   setPath(routePath("client-detail", clientId));
+  void loadClientDetail(clientId).then(buildInsights);
 };
 const openClientConversations = (clientId: string) => {
   selectedClientId.value = clientId;
   activeNav.value = "clients";
   route.value = "client-conversations";
   setPath(routePath("client-conversations", clientId));
+  void loadClientDetail(clientId).then(buildInsights);
 };
 const openTranscript = (conversationId: string) => {
   selectedConversationId.value = conversationId;
   transcriptContext.value = activeNav.value === "clients" ? "clients" : "conversations";
   if (transcriptContext.value === "clients") {
-    selectedClientId.value = conversations.find((conversation) => conversation.id === conversationId)?.clientId || selectedClientId.value;
+    selectedClientId.value = conversations.value.find((conversation) => conversation.id === conversationId)?.clientId || selectedClientId.value;
   }
   route.value = "transcript";
   setPath(routePath("transcript", conversationId));
 };
 const downloadTranscript = (conversationId: string) => {
-  const conversation = conversations.find((item) => item.id === conversationId);
+  const conversation = conversations.value.find((item) => item.id === conversationId);
   if (!conversation) return;
   const body = conversation.transcript.map((row) => `${row.timestamp} - ${row.speaker}: ${row.message}`).join("\n");
   const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
@@ -707,11 +969,29 @@ const setPath = (path: string) => {
   window.history.pushState({}, "", path);
 };
 
-const signIn = () => {
-  isSignedIn.value = true;
-  route.value = "dashboard";
-  activeNav.value = "dashboard";
-  setPath("/dashboard");
+const signIn = async () => {
+  authError.value = "";
+  try {
+    const result = await apiPost<{
+      token: string;
+      admin: { id: string; name: string; email: string; role: string };
+    }>("/api/auth/sign-in", {
+      email: signInEmail.value,
+      password: signInPassword.value
+    });
+    authToken.value = result.token;
+    localStorage.setItem("pigui_dashboard_token", result.token);
+    settings.value.adminName = result.admin.name;
+    settings.value.adminEmail = result.admin.email;
+    settings.value.adminRole = result.admin.role;
+    isSignedIn.value = true;
+    route.value = "dashboard";
+    activeNav.value = "dashboard";
+    setPath("/dashboard");
+    await loadProductionData();
+  } catch (error) {
+    authError.value = error instanceof Error ? error.message : "Could not sign in.";
+  }
 };
 
 const syncRouteFromPath = () => {
@@ -759,6 +1039,14 @@ const syncRouteFromPath = () => {
 
 onMounted(() => {
   syncRouteFromPath();
+  if (authToken.value) {
+    isSignedIn.value = true;
+    void loadProductionData();
+  }
   window.addEventListener("popstate", syncRouteFromPath);
+});
+
+watch(selectedRange, () => {
+  if (isSignedIn.value) void loadProductionData();
 });
 </script>
