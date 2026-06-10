@@ -26,7 +26,7 @@
   <main v-else class="app-frame">
     <aside class="sidebar">
       <div class="brand-block">
-        <span class="brand-mark">P</span>
+        <img class="brand-mark" src="/pigui-logo.jpg" alt="Pigui" />
         <div>
           <strong>Pigui AI</strong>
           <small>Agents Dashboard</small>

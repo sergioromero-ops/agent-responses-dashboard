@@ -150,13 +150,11 @@ select:focus {
 }
 
 .brand-mark {
-  align-items: center;
-  background: #1f6fff;
   border-radius: 10px;
-  display: flex;
-  font-weight: 900;
   height: 38px;
-  justify-content: center;
+  object-fit: cover;
+  object-position: center;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
   width: 38px;
 }
 
