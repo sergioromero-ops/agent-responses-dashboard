@@ -1382,10 +1382,7 @@ const syncRouteFromPath = () => {
 
 onMounted(() => {
   syncRouteFromPath();
-  if (authToken.value) {
-    isSignedIn.value = true;
-    void loadProductionData();
-  }
+  if (!window.location.pathname.startsWith("/sign-in")) void loadProductionData();
   window.addEventListener("popstate", syncRouteFromPath);
 });
 
