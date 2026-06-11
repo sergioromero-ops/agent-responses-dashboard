@@ -85,6 +85,40 @@
           </div>
         </section>
 
+        <section class="panel chart-panel">
+          <div class="chart-panel__header">
+            <div>
+              <h2>Answers distribution by segment</h2>
+              <p>Real production data, shown as a jittered violin-style distribution for the selected 90-day window.</p>
+            </div>
+            <div class="chart-panel__stats">
+              <div>
+                <span>Clients</span>
+                <strong>{{ formatNumber(distributionSummary.clients) }}</strong>
+              </div>
+              <div>
+                <span>Average interactions</span>
+                <strong>{{ distributionSummary.averageInteractions }}</strong>
+              </div>
+              <div>
+                <span>Top segment</span>
+                <strong>{{ distributionSummary.topSegment }}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="chart-panel__legend">
+              <span v-for="group in chartBreakdown" :key="group.label" class="chart-pill">
+                <i class="chart-pill__dot" :style="{ backgroundColor: group.color }" aria-hidden="true"></i>
+                {{ group.label }}
+              </span>
+            </div>
+
+          <div class="chart-panel__chart">
+            <ApexChart type="boxPlot" height="420" :options="distributionChartOptions" :series="distributionChartSeries" />
+          </div>
+        </section>
+
         <section class="panel">
           <div class="section-heading">
             <h2>Customer Journey Flow</h2>
@@ -385,6 +419,8 @@
 </template>
 
 <script setup lang="ts">
+import ApexChart from "vue3-apexcharts";
+import type { ApexOptions } from "apexcharts";
 import { computed, defineComponent, h, onMounted, ref, watch } from "vue";
 
 type NavId = "dashboard" | "clients" | "conversations" | "agents" | "insights" | "settings";
@@ -447,6 +483,40 @@ type AdminUser = {
   updatedAt?: string;
 };
 
+type DistributionGroup = {
+  label: string;
+  color: string;
+  values: number[];
+  boxStats: [number, number, number, number, number];
+  scatterPoints: Array<{ x: number; y: number }>;
+};
+
+const distributionPalette = ["#2563eb", "#8b5cf6", "#06b6d4", "#f97316", "#10b981", "#ef4444"];
+
+const hashToJitter = (seed: string) => {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) | 0;
+  }
+  const normalized = (Math.abs(hash) % 1000) / 1000;
+  return (normalized - 0.5) * 0.42;
+};
+
+const percentile = (values: number[], quantile: number) => {
+  if (!values.length) return 0;
+  if (values.length === 1) return values[0];
+  const position = (values.length - 1) * quantile;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return values[lower];
+  return values[lower] + (values[upper] - values[lower]) * (position - lower);
+};
+
+const buildBoxStats = (values: number[]): [number, number, number, number, number] => {
+  const sorted = [...values].sort((left, right) => left - right);
+  return [sorted[0], percentile(sorted, 0.25), percentile(sorted, 0.5), percentile(sorted, 0.75), sorted[sorted.length - 1]];
+};
+
 const isSignedIn = ref(false);
 const signInEmail = ref("admin@pigui.ai");
 const signInPassword = ref("");
@@ -479,6 +549,165 @@ const apiSummary = ref({
   b2bUsers: 0,
   b2cUsers: 0,
   b2oUsers: 0
+});
+const chartBreakdown = computed<DistributionGroup[]>(() => {
+  const groups = new Map<string, number[]>();
+
+  for (const client of clients.value) {
+    const label = String(client.country || "Sin segmento").trim() || "Sin segmento";
+    const value = Number(client.interactions || 0);
+    if (!Number.isFinite(value)) continue;
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label)?.push(value);
+  }
+
+  return [...groups.entries()]
+    .sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
+    .slice(0, distributionPalette.length)
+    .map(([label, values], index) => {
+      const normalized = values.filter((value) => Number.isFinite(value));
+      const boxStats = buildBoxStats(normalized);
+      return {
+        label,
+        color: distributionPalette[index % distributionPalette.length],
+        values: normalized,
+        boxStats,
+        scatterPoints: normalized.map((value, pointIndex) => ({
+          x: index + hashToJitter(`${label}-${value}-${pointIndex}`),
+          y: value
+        }))
+      };
+    });
+});
+const distributionSummary = computed(() => {
+  const allValues = chartBreakdown.value.flatMap((group) => group.values);
+  const average = allValues.length ? allValues.reduce((sum, value) => sum + value, 0) / allValues.length : 0;
+  const topSegment = chartBreakdown.value[0]?.label || "No data";
+
+  return {
+    clients: clients.value.length,
+    averageInteractions: Math.round(average).toLocaleString("en-US"),
+    topSegment
+  };
+});
+const distributionChartSeries = computed(() => {
+  const boxPlotSeries = {
+    name: "Distribution",
+    type: "boxPlot",
+    data: chartBreakdown.value.map((group, index) => ({
+      x: index,
+      y: group.boxStats
+    }))
+  };
+
+  const scatterSeries = chartBreakdown.value.map((group) => ({
+    name: group.label,
+    type: "scatter",
+    data: group.scatterPoints
+  }));
+
+  return [boxPlotSeries, ...scatterSeries];
+});
+const distributionChartOptions = computed<ApexOptions>(() => {
+  const labels = chartBreakdown.value.map((group) => group.label);
+  const maxIndex = Math.max(labels.length - 1, 0);
+
+  return {
+    chart: {
+      type: "boxPlot" as const,
+      height: 420,
+      toolbar: { show: false },
+      zoom: { enabled: false },
+      animations: {
+        enabled: true,
+        easing: "easeinout",
+        speed: 850,
+        dynamicAnimation: {
+          enabled: true,
+          speed: 850
+        }
+      },
+      foreColor: "#5b6b84",
+      background: "transparent"
+    },
+    colors: ["#143f91", ...chartBreakdown.value.map((group) => group.color)],
+    dataLabels: { enabled: false },
+    legend: { show: false },
+    stroke: {
+      width: [2, ...chartBreakdown.value.map(() => 0)],
+      curve: "smooth"
+    },
+    fill: {
+      opacity: [1, ...chartBreakdown.value.map(() => 0.82)]
+    },
+    plotOptions: {
+      boxPlot: {
+        colors: {
+          upper: "#dbe7ff",
+          lower: "#6a86ff"
+        }
+      }
+    },
+    grid: {
+      borderColor: "#e3ebf5",
+      strokeDashArray: 5,
+      xaxis: { lines: { show: false } },
+      yaxis: { lines: { show: true } }
+    },
+    xaxis: {
+      type: "numeric",
+      min: -0.65,
+      max: maxIndex + 0.65,
+      tickAmount: Math.max(maxIndex, 1),
+      labels: {
+        formatter: (value: string) => {
+          const index = Math.round(Number(value));
+          return labels[index] || "";
+        },
+        style: {
+          colors: "#6c7a92",
+          fontSize: "12px",
+          fontWeight: 600
+        }
+      },
+      axisBorder: { show: false },
+      axisTicks: { show: false },
+      tooltip: { enabled: false }
+    },
+    yaxis: {
+      min: 0,
+      title: {
+        text: "Interactions per client",
+        style: {
+          color: "#44546b",
+          fontWeight: 700
+        }
+      },
+      labels: {
+        style: {
+          colors: "#6c7a92"
+        }
+      }
+    },
+    markers: {
+      size: [0, ...chartBreakdown.value.map(() => 5)],
+      hover: {
+        sizeOffset: 2
+      },
+      strokeWidth: 0
+    },
+    tooltip: {
+      shared: false,
+      intersect: false,
+      theme: "light",
+      y: {
+        formatter: (value: number) => `${Math.round(value)} interactions`
+      },
+      x: {
+        formatter: (_value: string, opts: any) => labels[Math.round(Number(opts?.x ?? 0))] || "Segment"
+      }
+    }
+  };
 });
 const conversationFilters = ref({ area: "All areas", agent: "All agents", status: "All statuses", friction: "All friction" });
 const agentFilters = ref({ area: "All areas", status: "All statuses", type: "All types" });
