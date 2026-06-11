@@ -745,7 +745,23 @@ const loadAdminUsers = async () => {
     }];
     return;
   }
-  adminUsers.value = await apiGet<AdminUser[]>("/api/admin/users");
+  if (!authToken.value) {
+    adminUsers.value = [];
+    return;
+  }
+  try {
+    adminUsers.value = await apiGet<AdminUser[]>("/api/admin/users");
+  } catch (error) {
+    adminUsers.value = [];
+    if (error instanceof Error && /unauthorized/i.test(error.message)) {
+      authToken.value = "";
+      localStorage.removeItem("pigui_dashboard_token");
+      return;
+    }
+    if (route.value === "settings") {
+      adminNotice.value = error instanceof Error ? error.message : "Could not load admin users.";
+    }
+  }
 };
 const createAdminUser = async () => {
   adminNotice.value = "";
@@ -837,7 +853,7 @@ const loadProductionData = async () => {
     conversations.value = [];
     await Promise.all(clients.value.slice(0, 25).map((client) => loadClientDetail(client.id)));
     buildInsights();
-    await loadAdminUsers();
+    void loadAdminUsers();
   } catch (error) {
     dashboardError.value = error instanceof Error ? error.message : "Could not load production data.";
     clients.value = [];
@@ -942,6 +958,7 @@ const goTo = (id: NavId) => {
   activeNav.value = id;
   route.value = id;
   setPath(routePath(id));
+  if (id === "settings") void loadAdminUsers();
 };
 const openClient = (clientId: string) => {
   selectedClientId.value = clientId;
