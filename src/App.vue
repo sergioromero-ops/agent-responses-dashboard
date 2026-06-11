@@ -88,34 +88,34 @@
         <section class="panel chart-panel">
           <div class="chart-panel__header">
             <div>
-              <h2>Activity concentration</h2>
-              <p>Real production data showing which users drive most of the answer volume in the selected 90-day window.</p>
+              <h2>Business pulse</h2>
+              <p>Real production data showing the trend of sessions, answers and completed sessions across the selected 90-day window.</p>
             </div>
             <div class="chart-panel__stats">
               <div>
-                <span>Top 10 share</span>
-                <strong>{{ distributionSummary.clients }}</strong>
+                <span>Sessions</span>
+                <strong>{{ formatNumber(apiSummary.sessions) }}</strong>
               </div>
               <div>
-                <span>Median answers</span>
-                <strong>{{ distributionSummary.averageInteractions }}</strong>
+                <span>Answers / session</span>
+                <strong>{{ apiSummary.avgAnswersPerSession.toFixed(1) }}</strong>
               </div>
               <div>
-                <span>Leader</span>
-                <strong>{{ distributionSummary.topSegment }}</strong>
+                <span>Completion rate</span>
+                <strong>{{ pulseSummary.completionRate }}</strong>
               </div>
             </div>
           </div>
 
           <div class="chart-panel__legend chart-panel__legend--users">
-              <span v-for="group in chartBreakdown.slice(0, 8)" :key="group.label" class="chart-pill">
-                <i class="chart-pill__dot" :style="{ backgroundColor: group.color }" aria-hidden="true"></i>
-                {{ group.label }} · {{ formatNumber(group.total) }}
+              <span v-for="item in pulseLegend" :key="item.label" class="chart-pill">
+                <i class="chart-pill__dot" :style="{ backgroundColor: item.color }" aria-hidden="true"></i>
+                {{ item.label }} · {{ item.value }}
               </span>
             </div>
 
           <div class="chart-panel__chart">
-            <ApexChart type="line" height="420" :options="distributionChartOptions" :series="distributionChartSeries" />
+            <ApexChart type="area" height="420" :options="pulseChartOptions" :series="pulseChartSeries" />
           </div>
         </section>
 
@@ -438,10 +438,13 @@ type Client = {
   segment?: string;
   state: string;
   city: string;
+  sessions: number;
+  completedSessions: number;
   interactions: number;
   journey: string;
   lastAgent: string;
   lastActivity: string;
+  lastActivityAt?: string;
   status: Status;
   piguiBusinessId: string;
   piguiScanId: string;
@@ -489,7 +492,6 @@ type DistributionGroup = {
   label: string;
   color: string;
   total: number;
-  cumulativeShare: number;
 };
 
 const distributionPalette = ["#2563eb", "#8b5cf6", "#06b6d4", "#f97316", "#10b981", "#ef4444"];
@@ -579,80 +581,66 @@ const apiSummary = ref({
   b2cUsers: 0,
   b2oUsers: 0
 });
-const chartBreakdown = computed<DistributionGroup[]>(() => {
-  const groups = new Map<string, DistributionGroup>();
-
-  for (const client of clients.value) {
-    const label = String(client.name || client.email || client.id || "Unknown user").trim() || "Unknown user";
-    const value = Number(client.interactions || 0);
-    if (!Number.isFinite(value)) continue;
-    groups.set(client.id, {
-      label,
-      color: distributionPalette[groups.size % distributionPalette.length],
-      total: value,
-      cumulativeShare: 0
-    });
+const businessPulsePoints = computed(() => {
+  const bucketMap = new Map<number, { startDate: Date; sessions: number; answers: number; completedSessions: number }>();
+  const current = new Date();
+  const today = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+  for (let index = 12; index >= 0; index -= 1) {
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - index * 7);
+    bucketMap.set(index, { startDate, sessions: 0, answers: 0, completedSessions: 0 });
   }
-
-  const sorted = [...groups.values()]
-    .sort((left, right) => right.total - left.total || left.label.localeCompare(right.label))
-    .slice(0, 10);
-
-  const totalAnswers = sorted.reduce((sum, group) => sum + group.total, 0) || 1;
-  let runningTotal = 0;
-  return sorted.map((group) => {
-    runningTotal += group.total;
-    return {
-      ...group,
-      cumulativeShare: Number(((runningTotal / totalAnswers) * 100).toFixed(1))
-    };
-  });
+  for (const client of clients.value) {
+    if (!client.lastActivityAt) continue;
+    const activityDate = new Date(client.lastActivityAt);
+    if (Number.isNaN(activityDate.getTime())) continue;
+    const activityDay = new Date(activityDate.getFullYear(), activityDate.getMonth(), activityDate.getDate());
+    const diffMs = today.getTime() - activityDay.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays < 0 || diffDays > 90) continue;
+    const bucketIndex = Math.min(12, Math.floor(diffDays / 7));
+    const bucket = bucketMap.get(bucketIndex);
+    if (!bucket) continue;
+    bucket.sessions += Number(client.sessions || 0);
+    bucket.answers += Number(client.interactions || 0);
+    bucket.completedSessions += Number(client.completedSessions || 0);
+  }
+  return [...bucketMap.values()].map((values) => ({
+    date: values.startDate.toISOString().slice(0, 10),
+    ...values
+  }));
 });
-const distributionSummary = computed(() => {
-  const totals = clients.value
-    .map((client) => Number(client.interactions || 0))
-    .filter((value) => Number.isFinite(value))
-    .sort((left, right) => left - right);
-  const median = totals.length
-    ? totals.length % 2 === 1
-      ? totals[(totals.length - 1) / 2]
-      : (totals[totals.length / 2 - 1] + totals[totals.length / 2]) / 2
-    : 0;
-  const topSegment = chartBreakdown.value[0]?.label || "No data";
-  const allAnswers = totals.reduce((sum, value) => sum + value, 0) || 1;
-  const top10Answers = chartBreakdown.value.reduce((sum, group) => sum + group.total, 0);
-
-  return {
-    clients: `${Math.round((top10Answers / allAnswers) * 100)}%`,
-    averageInteractions: Math.round(median).toLocaleString("en-US"),
-    topSegment
-  };
+const pulseLegend = computed(() => [
+  { label: "Sessions", value: formatNumber(apiSummary.value.sessions), color: "#2563eb" },
+  { label: "Answers", value: formatNumber(apiSummary.value.answers), color: "#8b5cf6" },
+  { label: "Completed", value: formatNumber(apiSummary.value.completedSessions), color: "#10b981" }
+]);
+const pulseSummary = computed(() => {
+  const completionRate = apiSummary.value.sessions > 0 ? `${Math.round((apiSummary.value.completedSessions / apiSummary.value.sessions) * 100)}%` : "0%";
+  return { completionRate };
 });
-const distributionChartSeries = computed(() => {
+const pulseChartSeries = computed(() => {
+  const points = businessPulsePoints.value;
   return [
     {
-      name: "Answers",
-      type: "column",
-      data: chartBreakdown.value.map((group) => ({
-        x: group.label,
-        y: group.total,
-        fillColor: group.color
-      }))
+      name: "Sessions",
+      data: points.map((point) => point.sessions)
     },
     {
-      name: "Cumulative share",
-      type: "line",
-      data: chartBreakdown.value.map((group) => ({
-        x: group.label,
-        y: group.cumulativeShare
-      }))
+      name: "Answers",
+      data: points.map((point) => point.answers)
+    },
+    {
+      name: "Completed",
+      data: points.map((point) => point.completedSessions)
     }
   ];
 });
-const distributionChartOptions = computed<ApexOptions>(() => {
+const pulseChartOptions = computed<ApexOptions>(() => {
+  const labels = businessPulsePoints.value.map((point) => new Date(`${point.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }));
   return {
     chart: {
-      type: "line" as const,
+      type: "area",
       height: 420,
       toolbar: { show: false },
       zoom: { enabled: false },
@@ -668,7 +656,7 @@ const distributionChartOptions = computed<ApexOptions>(() => {
       foreColor: "#5b6b84",
       background: "transparent"
     },
-    colors: chartBreakdown.value.map((group) => group.color),
+    colors: ["#2563eb", "#8b5cf6", "#10b981"],
     dataLabels: { enabled: false },
     legend: {
       show: true,
@@ -677,15 +665,17 @@ const distributionChartOptions = computed<ApexOptions>(() => {
       fontWeight: 700,
       labels: { colors: "#44546b" }
     },
-    fill: {
-      opacity: 0.92,
-      colors: chartBreakdown.value.map((group) => group.color)
+    stroke: {
+      curve: "smooth",
+      width: [3, 3, 3]
     },
-    plotOptions: {
-      bar: {
-        horizontal: false,
-        borderRadius: 10,
-        columnWidth: "58%"
+    fill: {
+      type: "gradient",
+      gradient: {
+        shadeIntensity: 0.22,
+        opacityFrom: 0.26,
+        opacityTo: 0.03,
+        stops: [0, 100]
       }
     },
     grid: {
@@ -695,56 +685,31 @@ const distributionChartOptions = computed<ApexOptions>(() => {
       yaxis: { lines: { show: true } }
     },
     xaxis: {
-      type: "category",
+      categories: labels,
+      axisBorder: { show: false },
+      axisTicks: { show: false },
       labels: {
         style: {
           colors: "#6c7a92",
           fontSize: "12px",
           fontWeight: 600
-        }
-      },
-      axisBorder: { show: false },
-      axisTicks: { show: false },
-      tooltip: { enabled: false }
+        },
+        rotate: 0,
+        rotateAlways: false
+      }
     },
     yaxis: {
       min: 0,
-      max: 100,
-      tickAmount: 5,
       labels: {
-        formatter: (value) => `${Math.round(value)}%`,
         style: {
           colors: "#6c7a92"
         }
       }
     },
-    stroke: {
-      width: [0, 4],
-      curve: "smooth"
-    },
-    markers: {
-      size: [0, 4],
-      strokeWidth: 2,
-      strokeColors: "#ffffff",
-      hover: {
-        size: 6
-      }
-    },
     tooltip: {
       theme: "light",
       shared: true,
-      intersect: false,
-      y: {
-        formatter: (value, opts) => ((opts?.seriesIndex ?? 0) === 1 ? `${value.toFixed(1)}% cumulative share` : `${Math.round(value)} answers`)
-      }
-    },
-    states: {
-      hover: {
-        filter: {
-          type: "darken",
-          value: 0.08
-        }
-      }
+      intersect: false
     }
   };
 });
@@ -804,16 +769,16 @@ const agentCatalog: Agent[] = [
 
 const USE_DEMO_DATA = false;
 const demoClients: Client[] = [
-  { id: "sergio-romero", name: "Sergio Romero", email: "sergio.romero@acme.com", phone: "+52 55 1234 5678", country: "Mexico", state: "Mexico City", city: "Mexico City", interactions: 128, journey: "9/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "08 Jun 2026, 10:24", status: "Completed", piguiBusinessId: "PB-1001", piguiScanId: "PS-4301", piguiRewardsId: "PR-9001" },
-  { id: "ana-torres", name: "Ana Torres", email: "ana.torres@northstar.com", phone: "+1 512 555 0102", country: "United States", state: "Texas", city: "Austin", interactions: 86, journey: "7/9", lastAgent: "Rewards Feedback Agent", lastActivity: "Today, 10:42", status: "In progress", piguiBusinessId: "PB-1002", piguiScanId: "PS-4302", piguiRewardsId: "PR-9002" },
-  { id: "carlos-mendez", name: "Carlos Mendez", email: "carlos.mendez@local.mx", phone: "+52 81 5555 1234", country: "Mexico", state: "Nuevo Leon", city: "Monterrey", interactions: 74, journey: "6/9", lastAgent: "Consumer Baseline Agent", lastActivity: "Today, 09:58", status: "In progress", piguiBusinessId: "PB-1003", piguiScanId: "PS-4303", piguiRewardsId: "PR-9003" },
-  { id: "mariana-lopez", name: "Mariana Lopez", email: "mariana.lopez@retail.co", phone: "+52 33 1234 9090", country: "Mexico", state: "Jalisco", city: "Guadalajara", interactions: 65, journey: "5/9", lastAgent: "Dashboard Financial Agent", lastActivity: "Yesterday, 18:10", status: "In progress", piguiBusinessId: "PB-1004", piguiScanId: "PS-4304", piguiRewardsId: "PR-9004" },
-  { id: "roberto-cruz", name: "Roberto Cruz", email: "roberto.cruz@services.io", phone: "+1 312 555 0144", country: "United States", state: "Illinois", city: "Chicago", interactions: 54, journey: "3/9", lastAgent: "Onboarding Feedback Agent", lastActivity: "Yesterday, 16:55", status: "New", piguiBusinessId: "PB-1005", piguiScanId: "PS-4305", piguiRewardsId: "PR-9005" },
-  { id: "sofia-herrera", name: "Sofia Herrera", email: "sofia.herrera@coffee.us", phone: "+1 602 555 0182", country: "United States", state: "Arizona", city: "Phoenix", interactions: 92, journey: "9/9", lastAgent: "Feedback Overview Agent", lastActivity: "07 Jun 2026, 14:08", status: "Completed", piguiBusinessId: "PB-1006", piguiScanId: "PS-4306", piguiRewardsId: "PR-9006" },
-  { id: "diego-martinez", name: "Diego Martinez", email: "diego.martinez@growth.ai", phone: "+52 55 9988 2211", country: "Mexico", state: "Mexico City", city: "Mexico City", interactions: 49, journey: "4/9", lastAgent: "Operative Branch Agent", lastActivity: "06 Jun 2026, 11:21", status: "In progress", piguiBusinessId: "PB-1007", piguiScanId: "PS-4307", piguiRewardsId: "PR-9007" },
-  { id: "laura-jimenez", name: "Laura Jimenez", email: "laura.jimenez@wellness.com", phone: "+1 415 555 0198", country: "United States", state: "California", city: "San Francisco", interactions: 43, journey: "2/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "05 Jun 2026, 09:18", status: "New", piguiBusinessId: "PB-1008", piguiScanId: "PS-4308", piguiRewardsId: "PR-9008" },
-  { id: "jorge-ramirez", name: "Jorge Ramirez", email: "jorge.ramirez@market.mx", phone: "+52 55 4488 7711", country: "Mexico", state: "Puebla", city: "Puebla", interactions: 38, journey: "8/9", lastAgent: "Scan Feedback Agent", lastActivity: "04 Jun 2026, 17:40", status: "In progress", piguiBusinessId: "PB-1009", piguiScanId: "PS-4309", piguiRewardsId: "PR-9009" },
-  { id: "paola-sanchez", name: "Paola Sanchez", email: "paola.sanchez@beauty.mx", phone: "+52 33 8877 2211", country: "Mexico", state: "Jalisco", city: "Zapopan", interactions: 31, journey: "1/9", lastAgent: "Website Agent", lastActivity: "02 Jun 2026, 12:33", status: "New", piguiBusinessId: "PB-1010", piguiScanId: "PS-4310", piguiRewardsId: "PR-9010" }
+  { id: "sergio-romero", name: "Sergio Romero", email: "sergio.romero@acme.com", phone: "+52 55 1234 5678", country: "Mexico", state: "Mexico City", city: "Mexico City", sessions: 9, completedSessions: 9, interactions: 128, journey: "9/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "08 Jun 2026, 10:24", lastActivityAt: "2026-06-08T10:24:00Z", status: "Completed", piguiBusinessId: "PB-1001", piguiScanId: "PS-4301", piguiRewardsId: "PR-9001" },
+  { id: "ana-torres", name: "Ana Torres", email: "ana.torres@northstar.com", phone: "+1 512 555 0102", country: "United States", state: "Texas", city: "Austin", sessions: 7, completedSessions: 6, interactions: 86, journey: "7/9", lastAgent: "Rewards Feedback Agent", lastActivity: "Today, 10:42", lastActivityAt: "2026-06-11T10:42:00Z", status: "In progress", piguiBusinessId: "PB-1002", piguiScanId: "PS-4302", piguiRewardsId: "PR-9002" },
+  { id: "carlos-mendez", name: "Carlos Mendez", email: "carlos.mendez@local.mx", phone: "+52 81 5555 1234", country: "Mexico", state: "Nuevo Leon", city: "Monterrey", sessions: 6, completedSessions: 5, interactions: 74, journey: "6/9", lastAgent: "Consumer Baseline Agent", lastActivity: "Today, 09:58", lastActivityAt: "2026-06-11T09:58:00Z", status: "In progress", piguiBusinessId: "PB-1003", piguiScanId: "PS-4303", piguiRewardsId: "PR-9003" },
+  { id: "mariana-lopez", name: "Mariana Lopez", email: "mariana.lopez@retail.co", phone: "+52 33 1234 9090", country: "Mexico", state: "Jalisco", city: "Guadalajara", sessions: 5, completedSessions: 4, interactions: 65, journey: "5/9", lastAgent: "Dashboard Financial Agent", lastActivity: "Yesterday, 18:10", lastActivityAt: "2026-06-10T18:10:00Z", status: "In progress", piguiBusinessId: "PB-1004", piguiScanId: "PS-4304", piguiRewardsId: "PR-9004" },
+  { id: "roberto-cruz", name: "Roberto Cruz", email: "roberto.cruz@services.io", phone: "+1 312 555 0144", country: "United States", state: "Illinois", city: "Chicago", sessions: 3, completedSessions: 2, interactions: 54, journey: "3/9", lastAgent: "Onboarding Feedback Agent", lastActivity: "Yesterday, 16:55", lastActivityAt: "2026-06-10T16:55:00Z", status: "New", piguiBusinessId: "PB-1005", piguiScanId: "PS-4305", piguiRewardsId: "PR-9005" },
+  { id: "sofia-herrera", name: "Sofia Herrera", email: "sofia.herrera@coffee.us", phone: "+1 602 555 0182", country: "United States", state: "Arizona", city: "Phoenix", sessions: 9, completedSessions: 9, interactions: 92, journey: "9/9", lastAgent: "Feedback Overview Agent", lastActivity: "07 Jun 2026, 14:08", lastActivityAt: "2026-06-07T14:08:00Z", status: "Completed", piguiBusinessId: "PB-1006", piguiScanId: "PS-4306", piguiRewardsId: "PR-9006" },
+  { id: "diego-martinez", name: "Diego Martinez", email: "diego.martinez@growth.ai", phone: "+52 55 9988 2211", country: "Mexico", state: "Mexico City", city: "Mexico City", sessions: 4, completedSessions: 3, interactions: 49, journey: "4/9", lastAgent: "Operative Branch Agent", lastActivity: "06 Jun 2026, 11:21", lastActivityAt: "2026-06-06T11:21:00Z", status: "In progress", piguiBusinessId: "PB-1007", piguiScanId: "PS-4307", piguiRewardsId: "PR-9007" },
+  { id: "laura-jimenez", name: "Laura Jimenez", email: "laura.jimenez@wellness.com", phone: "+1 415 555 0198", country: "United States", state: "California", city: "San Francisco", sessions: 2, completedSessions: 1, interactions: 43, journey: "2/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "05 Jun 2026, 09:18", lastActivityAt: "2026-06-05T09:18:00Z", status: "New", piguiBusinessId: "PB-1008", piguiScanId: "PS-4308", piguiRewardsId: "PR-9008" },
+  { id: "jorge-ramirez", name: "Jorge Ramirez", email: "jorge.ramirez@market.mx", phone: "+52 55 4488 7711", country: "Mexico", state: "Puebla", city: "Puebla", sessions: 8, completedSessions: 7, interactions: 38, journey: "8/9", lastAgent: "Scan Feedback Agent", lastActivity: "04 Jun 2026, 17:40", lastActivityAt: "2026-06-04T17:40:00Z", status: "In progress", piguiBusinessId: "PB-1009", piguiScanId: "PS-4309", piguiRewardsId: "PR-9009" },
+  { id: "paola-sanchez", name: "Paola Sanchez", email: "paola.sanchez@beauty.mx", phone: "+52 33 8877 2211", country: "Mexico", state: "Jalisco", city: "Zapopan", sessions: 1, completedSessions: 1, interactions: 31, journey: "1/9", lastAgent: "Website Agent", lastActivity: "02 Jun 2026, 12:33", lastActivityAt: "2026-06-02T12:33:00Z", status: "New", piguiBusinessId: "PB-1010", piguiScanId: "PS-4310", piguiRewardsId: "PR-9010" }
 ];
 const demoTranscript = (client: string): TranscriptRow[] => [
   { timestamp: "00:00", speaker: "Pigui", message: `Hello ${client}, thanks for your time. I will ask a few quick questions to understand your experience.` },
@@ -1106,10 +1071,13 @@ const loadProductionData = async () => {
         segment: user.segment || "Sin segmento",
         state: user.channel || "Unknown",
         city: user.deviceName || "Unknown",
+        sessions: user.sessions || 0,
+        completedSessions: user.completedSessions || 0,
         interactions: user.answers,
         journey: `${Math.min(9, Math.max(1, user.sessions || 1))}/9`,
         lastAgent: "Personal & Business Baseline Agent",
         lastActivity: formatDate(user.lastActivityAt),
+        lastActivityAt: user.lastActivityAt,
         status: completed ? "Completed" : user.sessions > 0 ? "In progress" : "New",
         piguiBusinessId: user.userId,
         piguiScanId: user.segment || "Unknown",
