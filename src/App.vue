@@ -452,7 +452,7 @@ const signInEmail = ref("admin@pigui.ai");
 const signInPassword = ref("");
 const route = ref<Route>("dashboard");
 const activeNav = ref<NavId>("dashboard");
-const selectedRange = ref("Last 30 days");
+const selectedRange = ref("Last 12 months");
 const selectedClientId = ref("");
 const selectedConversationId = ref("");
 const transcriptContext = ref<"clients" | "conversations">("conversations");
@@ -498,7 +498,7 @@ const settings = ref({
   adminRole: "Administrator",
   dashboardLanguage: "English",
   timeZone: "US Central Time",
-  defaultDateRange: "Last 30 days",
+  defaultDateRange: "Last 12 months",
   timeFormat: "12-hour",
   criticalFrictionAlerts: true,
   integrationFailureAlerts: true,
