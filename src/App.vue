@@ -323,7 +323,7 @@
       </section>
 
       <section v-else-if="route === 'settings'" class="page-stack settings-grid">
-        <section class="panel">
+        <section class="panel admin-profile-panel">
           <h2>Administrator Profile</h2>
           <label>Name<input v-model="settings.adminName" /></label>
           <label>Email<input v-model="settings.adminEmail" /></label>
