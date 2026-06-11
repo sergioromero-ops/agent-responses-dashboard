@@ -115,7 +115,7 @@
             </div>
 
           <div class="chart-panel__chart">
-            <ApexChart type="boxPlot" height="420" :options="distributionChartOptions" :series="distributionChartSeries" />
+            <ApexChart type="violin" height="420" :options="distributionChartOptions" :series="distributionChartSeries" />
           </div>
         </section>
 
@@ -1088,7 +1088,7 @@ const loadProductionData = async () => {
     });
     if (!selectedClientId.value && clients.value[0]) selectedClientId.value = clients.value[0].id;
     conversations.value = [];
-    await Promise.all(clients.value.slice(0, 25).map((client) => loadClientDetail(client.id)));
+    await Promise.allSettled(clients.value.slice(0, 25).map((client) => loadClientDetail(client.id)));
     buildInsights();
     void loadAdminUsers();
   } catch (error) {
