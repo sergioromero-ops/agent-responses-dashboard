@@ -324,8 +324,6 @@ app.post("/api/admin/users/:id/reset-password", requireAuth, async (req, res, ne
   }
 });
 
-app.use("/api", requireAuth);
-
 app.get("/api/summary", async (req, res, next) => {
   if (!requireDb(res)) return;
 
