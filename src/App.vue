@@ -534,7 +534,7 @@ const agentCatalog: Agent[] = [
   { id: "feedback-overview", step: "09", name: "Feedback Overview Agent", area: "B2B", status: "Active", type: "Feedback", clientsWithActivity: 0, conversations: 0, lastActivity: "No activity", purpose: "Captures final feedback after Business, Rewards, and Scan." }
 ];
 
-const USE_DEMO_DATA = true;
+const USE_DEMO_DATA = false;
 const demoClients: Client[] = [
   { id: "sergio-romero", name: "Sergio Romero", email: "sergio.romero@acme.com", phone: "+52 55 1234 5678", country: "Mexico", state: "Mexico City", city: "Mexico City", interactions: 128, journey: "9/9", lastAgent: "Personal & Business Baseline Agent", lastActivity: "08 Jun 2026, 10:24", status: "Completed", piguiBusinessId: "PB-1001", piguiScanId: "PS-4301", piguiRewardsId: "PR-9001" },
   { id: "ana-torres", name: "Ana Torres", email: "ana.torres@northstar.com", phone: "+1 512 555 0102", country: "United States", state: "Texas", city: "Austin", interactions: 86, journey: "7/9", lastAgent: "Rewards Feedback Agent", lastActivity: "Today, 10:42", status: "In progress", piguiBusinessId: "PB-1002", piguiScanId: "PS-4302", piguiRewardsId: "PR-9002" },
