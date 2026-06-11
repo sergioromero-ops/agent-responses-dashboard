@@ -419,6 +419,7 @@
 </template>
 
 <script setup lang="ts">
+import "apexcharts/violin";
 import ApexChart from "vue3-apexcharts";
 import type { ApexOptions } from "apexcharts";
 import { computed, defineComponent, h, onMounted, ref, watch } from "vue";
@@ -434,6 +435,7 @@ type Client = {
   email: string;
   phone: string;
   country: string;
+  segment?: string;
   state: string;
   city: string;
   interactions: number;
@@ -487,8 +489,8 @@ type DistributionGroup = {
   label: string;
   color: string;
   values: number[];
-  boxStats: [number, number, number, number, number];
-  scatterPoints: Array<{ x: number; y: number }>;
+  density: Array<[number, number]>;
+  points: number[];
 };
 
 const distributionPalette = ["#2563eb", "#8b5cf6", "#06b6d4", "#f97316", "#10b981", "#ef4444"];
@@ -512,9 +514,37 @@ const percentile = (values: number[], quantile: number) => {
   return values[lower] + (values[upper] - values[lower]) * (position - lower);
 };
 
-const buildBoxStats = (values: number[]): [number, number, number, number, number] => {
+const buildDensity = (values: number[]): Array<[number, number]> => {
+  if (!values.length) return [];
+
   const sorted = [...values].sort((left, right) => left - right);
-  return [sorted[0], percentile(sorted, 0.25), percentile(sorted, 0.5), percentile(sorted, 0.75), sorted[sorted.length - 1]];
+  if (sorted.length === 1) {
+    const center = sorted[0];
+    return [
+      [Math.max(0, center - 1), 0],
+      [center, 1],
+      [center + 1, 0]
+    ];
+  }
+
+  const min = sorted[0];
+  const max = sorted[sorted.length - 1];
+  const span = Math.max(max - min, 1);
+  const bandwidth = Math.max(span / Math.max(sorted.length, 5), 2);
+  const sampleCount = 28;
+  const density: Array<[number, number]> = [];
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const x = min + (span * index) / (sampleCount - 1);
+    const weight = sorted.reduce((sum, value) => {
+      const scaled = (x - value) / bandwidth;
+      return sum + Math.exp(-0.5 * scaled * scaled);
+    }, 0);
+    density.push([x, weight]);
+  }
+
+  const maxWeight = Math.max(...density.map((entry) => entry[1]), 1);
+  return density.map(([x, weight]) => [x, Number((weight / maxWeight).toFixed(4))]);
 };
 
 const isSignedIn = ref(false);
@@ -554,7 +584,7 @@ const chartBreakdown = computed<DistributionGroup[]>(() => {
   const groups = new Map<string, number[]>();
 
   for (const client of clients.value) {
-    const label = String(client.country || "Sin segmento").trim() || "Sin segmento";
+    const label = String(client.segment || client.country || "Sin segmento").trim() || "Sin segmento";
     const value = Number(client.interactions || 0);
     if (!Number.isFinite(value)) continue;
     if (!groups.has(label)) groups.set(label, []);
@@ -566,16 +596,13 @@ const chartBreakdown = computed<DistributionGroup[]>(() => {
     .slice(0, distributionPalette.length)
     .map(([label, values], index) => {
       const normalized = values.filter((value) => Number.isFinite(value));
-      const boxStats = buildBoxStats(normalized);
+      const density = buildDensity(normalized);
       return {
         label,
         color: distributionPalette[index % distributionPalette.length],
         values: normalized,
-        boxStats,
-        scatterPoints: normalized.map((value, pointIndex) => ({
-          x: index + hashToJitter(`${label}-${value}-${pointIndex}`),
-          y: value
-        }))
+        density,
+        points: normalized
       };
     });
 });
@@ -591,30 +618,22 @@ const distributionSummary = computed(() => {
   };
 });
 const distributionChartSeries = computed(() => {
-  const boxPlotSeries = {
-    name: "Distribution",
-    type: "boxPlot",
-    data: chartBreakdown.value.map((group, index) => ({
-      x: index,
-      y: group.boxStats
+  return [{
+    name: "Interactions",
+    data: chartBreakdown.value.map((group) => ({
+      x: group.label,
+      y: {
+        density: group.density,
+        points: group.points
+      },
+      fillColor: group.color
     }))
-  };
-
-  const scatterSeries = chartBreakdown.value.map((group) => ({
-    name: group.label,
-    type: "scatter",
-    data: group.scatterPoints
-  }));
-
-  return [boxPlotSeries, ...scatterSeries];
+  }];
 });
 const distributionChartOptions = computed<ApexOptions>(() => {
-  const labels = chartBreakdown.value.map((group) => group.label);
-  const maxIndex = Math.max(labels.length - 1, 0);
-
   return {
     chart: {
-      type: "boxPlot" as const,
+      type: "violin" as const,
       height: 420,
       toolbar: { show: false },
       zoom: { enabled: false },
@@ -630,21 +649,31 @@ const distributionChartOptions = computed<ApexOptions>(() => {
       foreColor: "#5b6b84",
       background: "transparent"
     },
-    colors: ["#143f91", ...chartBreakdown.value.map((group) => group.color)],
+    colors: chartBreakdown.value.map((group) => group.color),
     dataLabels: { enabled: false },
     legend: { show: false },
     stroke: {
-      width: [2, ...chartBreakdown.value.map(() => 0)],
-      curve: "smooth"
+      width: 0
     },
     fill: {
-      opacity: [1, ...chartBreakdown.value.map(() => 0.82)]
+      opacity: 0.92,
+      colors: chartBreakdown.value.map((group) => group.color)
     },
     plotOptions: {
-      boxPlot: {
-        colors: {
-          upper: "#dbe7ff",
-          lower: "#6a86ff"
+      violin: {
+        normalize: "group",
+        bandwidthScale: 1.15,
+        points: {
+          show: true,
+          shape: "circle",
+          size: 4,
+          jitter: 0.38,
+          constrainToViolin: true,
+          maxPoints: 250,
+          opacity: 0.85,
+          fillColor: "series-dark",
+          strokeColor: "#ffffff",
+          strokeWidth: 1
         }
       }
     },
@@ -655,15 +684,8 @@ const distributionChartOptions = computed<ApexOptions>(() => {
       yaxis: { lines: { show: true } }
     },
     xaxis: {
-      type: "numeric",
-      min: -0.65,
-      max: maxIndex + 0.65,
-      tickAmount: Math.max(maxIndex, 1),
+      type: "category",
       labels: {
-        formatter: (value: string) => {
-          const index = Math.round(Number(value));
-          return labels[index] || "";
-        },
         style: {
           colors: "#6c7a92",
           fontSize: "12px",
@@ -689,23 +711,10 @@ const distributionChartOptions = computed<ApexOptions>(() => {
         }
       }
     },
-    markers: {
-      size: [0, ...chartBreakdown.value.map(() => 5)],
-      hover: {
-        sizeOffset: 2
-      },
-      strokeWidth: 0
-    },
     tooltip: {
-      shared: false,
-      intersect: false,
       theme: "light",
-      y: {
-        formatter: (value: number) => `${Math.round(value)} interactions`
-      },
-      x: {
-        formatter: (_value: string, opts: any) => labels[Math.round(Number(opts?.x ?? 0))] || "Segment"
-      }
+      shared: false,
+      intersect: false
     }
   };
 });
@@ -1064,6 +1073,7 @@ const loadProductionData = async () => {
         email: user.email || "Unknown",
         phone: user.phone || "Unknown",
         country: user.segment || "Unknown",
+        segment: user.segment || "Sin segmento",
         state: user.channel || "Unknown",
         city: user.deviceName || "Unknown",
         interactions: user.answers,
