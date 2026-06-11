@@ -88,20 +88,20 @@
         <section class="panel chart-panel">
           <div class="chart-panel__header">
             <div>
-              <h2>Answers by user</h2>
-              <p>Real production data showing how many answers each user sent in the selected 90-day window.</p>
+              <h2>Activity concentration</h2>
+              <p>Real production data showing which users drive most of the answer volume in the selected 90-day window.</p>
             </div>
             <div class="chart-panel__stats">
               <div>
-                <span>Users</span>
-                <strong>{{ formatNumber(distributionSummary.clients) }}</strong>
+                <span>Top 10 share</span>
+                <strong>{{ distributionSummary.clients }}</strong>
               </div>
               <div>
-                <span>Average answers</span>
+                <span>Median answers</span>
                 <strong>{{ distributionSummary.averageInteractions }}</strong>
               </div>
               <div>
-                <span>Top user</span>
+                <span>Leader</span>
                 <strong>{{ distributionSummary.topSegment }}</strong>
               </div>
             </div>
@@ -115,7 +115,7 @@
             </div>
 
           <div class="chart-panel__chart">
-            <ApexChart type="bar" height="420" :options="distributionChartOptions" :series="distributionChartSeries" />
+            <ApexChart type="line" height="420" :options="distributionChartOptions" :series="distributionChartSeries" />
           </div>
         </section>
 
@@ -489,6 +489,7 @@ type DistributionGroup = {
   label: string;
   color: string;
   total: number;
+  cumulativeShare: number;
 };
 
 const distributionPalette = ["#2563eb", "#8b5cf6", "#06b6d4", "#f97316", "#10b981", "#ef4444"];
@@ -588,39 +589,70 @@ const chartBreakdown = computed<DistributionGroup[]>(() => {
     groups.set(client.id, {
       label,
       color: distributionPalette[groups.size % distributionPalette.length],
-      total: value
+      total: value,
+      cumulativeShare: 0
     });
   }
 
-  return [...groups.values()]
+  const sorted = [...groups.values()]
     .sort((left, right) => right.total - left.total || left.label.localeCompare(right.label))
-    .slice(0, 12);
+    .slice(0, 10);
+
+  const totalAnswers = sorted.reduce((sum, group) => sum + group.total, 0) || 1;
+  let runningTotal = 0;
+  return sorted.map((group) => {
+    runningTotal += group.total;
+    return {
+      ...group,
+      cumulativeShare: Number(((runningTotal / totalAnswers) * 100).toFixed(1))
+    };
+  });
 });
 const distributionSummary = computed(() => {
-  const totals = clients.value.map((client) => Number(client.interactions || 0)).filter((value) => Number.isFinite(value));
-  const average = totals.length ? totals.reduce((sum, value) => sum + value, 0) / totals.length : 0;
+  const totals = clients.value
+    .map((client) => Number(client.interactions || 0))
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right);
+  const median = totals.length
+    ? totals.length % 2 === 1
+      ? totals[(totals.length - 1) / 2]
+      : (totals[totals.length / 2 - 1] + totals[totals.length / 2]) / 2
+    : 0;
   const topSegment = chartBreakdown.value[0]?.label || "No data";
+  const allAnswers = totals.reduce((sum, value) => sum + value, 0) || 1;
+  const top10Answers = chartBreakdown.value.reduce((sum, group) => sum + group.total, 0);
 
   return {
-    clients: clients.value.length,
-    averageInteractions: Math.round(average).toLocaleString("en-US"),
+    clients: `${Math.round((top10Answers / allAnswers) * 100)}%`,
+    averageInteractions: Math.round(median).toLocaleString("en-US"),
     topSegment
   };
 });
 const distributionChartSeries = computed(() => {
-  return [{
-    name: "Interactions",
-    data: chartBreakdown.value.map((group) => ({
-      x: group.label,
-      y: group.total,
-      fillColor: group.color
-    }))
-  }];
+  return [
+    {
+      name: "Answers",
+      type: "column",
+      data: chartBreakdown.value.map((group) => ({
+        x: group.label,
+        y: group.total,
+        fillColor: group.color
+      }))
+    },
+    {
+      name: "Cumulative share",
+      type: "line",
+      data: chartBreakdown.value.map((group) => ({
+        x: group.label,
+        y: group.cumulativeShare
+      }))
+    }
+  ];
 });
 const distributionChartOptions = computed<ApexOptions>(() => {
   return {
     chart: {
-      type: "bar" as const,
+      type: "line" as const,
       height: 420,
       toolbar: { show: false },
       zoom: { enabled: false },
@@ -638,20 +670,22 @@ const distributionChartOptions = computed<ApexOptions>(() => {
     },
     colors: chartBreakdown.value.map((group) => group.color),
     dataLabels: { enabled: false },
-    legend: { show: false },
+    legend: {
+      show: true,
+      position: "top",
+      horizontalAlign: "right",
+      fontWeight: 700,
+      labels: { colors: "#44546b" }
+    },
     fill: {
       opacity: 0.92,
       colors: chartBreakdown.value.map((group) => group.color)
     },
     plotOptions: {
       bar: {
-        horizontal: true,
-        borderRadius: 12,
-        barHeight: "70%",
-        distributed: true,
-        dataLabels: {
-          position: "top"
-        }
+        horizontal: false,
+        borderRadius: 10,
+        columnWidth: "58%"
       }
     },
     grid: {
@@ -661,7 +695,7 @@ const distributionChartOptions = computed<ApexOptions>(() => {
       yaxis: { lines: { show: true } }
     },
     xaxis: {
-      type: "numeric",
+      type: "category",
       labels: {
         style: {
           colors: "#6c7a92",
@@ -671,33 +705,46 @@ const distributionChartOptions = computed<ApexOptions>(() => {
       },
       axisBorder: { show: false },
       axisTicks: { show: false },
-      tooltip: { enabled: false },
-      title: {
-        text: "Answers",
-        style: {
-          color: "#44546b",
-          fontWeight: 700
-        }
-      }
+      tooltip: { enabled: false }
     },
     yaxis: {
-      title: {
-        text: undefined,
-        style: {
-          color: "#44546b",
-          fontWeight: 700
-        }
-      },
+      min: 0,
+      max: 100,
+      tickAmount: 5,
       labels: {
+        formatter: (value) => `${Math.round(value)}%`,
         style: {
           colors: "#6c7a92"
         }
       }
     },
+    stroke: {
+      width: [0, 4],
+      curve: "smooth"
+    },
+    markers: {
+      size: [0, 4],
+      strokeWidth: 2,
+      strokeColors: "#ffffff",
+      hover: {
+        size: 6
+      }
+    },
     tooltip: {
       theme: "light",
-      shared: false,
-      intersect: false
+      shared: true,
+      intersect: false,
+      y: {
+        formatter: (value, opts) => ((opts?.seriesIndex ?? 0) === 1 ? `${value.toFixed(1)}% cumulative share` : `${Math.round(value)} answers`)
+      }
+    },
+    states: {
+      hover: {
+        filter: {
+          type: "darken",
+          value: 0.08
+        }
+      }
     }
   };
 });
