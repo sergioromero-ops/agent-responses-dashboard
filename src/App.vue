@@ -62,7 +62,7 @@
         </div>
         <label v-if="showDateSelector" class="date-select">
           {{ copy.dateRange }}
-          <select v-model="selectedRange">
+          <select v-model="selectedRange" disabled>
             <option v-for="range in dateRanges" :key="range">{{ range }}</option>
           </select>
         </label>
@@ -369,7 +369,7 @@
           <label class="toggle-row"><input v-model="settings.integrationFailureAlerts" type="checkbox" /> Integration failure alerts</label>
           <label class="toggle-row"><input v-model="settings.automaticInsightsSummary" type="checkbox" /> Automatic insights summary</label>
         </section>
-        <section class="panel">
+        <section class="panel integrations-panel">
           <h2>Integrations</h2>
           <article v-for="integration in integrations" :key="integration.name" class="integration-row">
             <div>
@@ -452,7 +452,7 @@ const signInEmail = ref("admin@pigui.ai");
 const signInPassword = ref("");
 const route = ref<Route>("dashboard");
 const activeNav = ref<NavId>("dashboard");
-const selectedRange = ref("Last 12 months");
+const selectedRange = ref("Last 90 days");
 const selectedClientId = ref("");
 const selectedConversationId = ref("");
 const transcriptContext = ref<"clients" | "conversations">("conversations");
@@ -482,7 +482,7 @@ const apiSummary = ref({
 });
 const conversationFilters = ref({ area: "All areas", agent: "All agents", status: "All statuses", friction: "All friction" });
 const agentFilters = ref({ area: "All areas", status: "All statuses", type: "All types" });
-const dateRanges = ["Last 7 days", "Last 30 days", "Last 90 days", "Last 12 months", "Custom"];
+const dateRanges = ["Last 90 days"];
 const navItems: Array<{ id: NavId }> = [
   { id: "dashboard" },
   { id: "clients" },
@@ -498,7 +498,7 @@ const settings = ref({
   adminRole: "Administrator",
   dashboardLanguage: "English",
   timeZone: "US Central Time",
-  defaultDateRange: "Last 12 months",
+  defaultDateRange: "Last 90 days",
   timeFormat: "12-hour",
   criticalFrictionAlerts: true,
   integrationFailureAlerts: true,
@@ -600,10 +600,8 @@ const formatDate = (value?: string) => {
   }).format(date);
 };
 const daysFromRange = () => {
-  if (selectedRange.value === "Last 7 days") return 7;
   if (selectedRange.value === "Last 90 days") return 90;
-  if (selectedRange.value === "Last 12 months") return 365;
-  return 30;
+  return 90;
 };
 const apiGet = async <T,>(path: string): Promise<T> => {
   const response = await fetch(path, {
