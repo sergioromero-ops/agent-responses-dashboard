@@ -88,34 +88,34 @@
         <section class="panel chart-panel">
           <div class="chart-panel__header">
             <div>
-              <h2>Answers distribution by segment</h2>
-              <p>Real production data, shown as a jittered violin-style distribution for the selected 90-day window.</p>
+              <h2>Answers by user</h2>
+              <p>Real production data showing how many answers each user sent in the selected 90-day window.</p>
             </div>
             <div class="chart-panel__stats">
               <div>
-                <span>Clients</span>
+                <span>Users</span>
                 <strong>{{ formatNumber(distributionSummary.clients) }}</strong>
               </div>
               <div>
-                <span>Average interactions</span>
+                <span>Average answers</span>
                 <strong>{{ distributionSummary.averageInteractions }}</strong>
               </div>
               <div>
-                <span>Top segment</span>
+                <span>Top user</span>
                 <strong>{{ distributionSummary.topSegment }}</strong>
               </div>
             </div>
           </div>
 
-          <div class="chart-panel__legend">
-              <span v-for="group in chartBreakdown" :key="group.label" class="chart-pill">
+          <div class="chart-panel__legend chart-panel__legend--users">
+              <span v-for="group in chartBreakdown.slice(0, 8)" :key="group.label" class="chart-pill">
                 <i class="chart-pill__dot" :style="{ backgroundColor: group.color }" aria-hidden="true"></i>
-                {{ group.label }}
+                {{ group.label }} · {{ formatNumber(group.total) }}
               </span>
             </div>
 
           <div class="chart-panel__chart">
-            <ApexChart type="violin" height="420" :options="distributionChartOptions" :series="distributionChartSeries" />
+            <ApexChart type="bar" height="420" :options="distributionChartOptions" :series="distributionChartSeries" />
           </div>
         </section>
 
@@ -488,9 +488,7 @@ type AdminUser = {
 type DistributionGroup = {
   label: string;
   color: string;
-  values: number[];
-  density: Array<[number, number]>;
-  points: number[];
+  total: number;
 };
 
 const distributionPalette = ["#2563eb", "#8b5cf6", "#06b6d4", "#f97316", "#10b981", "#ef4444"];
@@ -581,34 +579,26 @@ const apiSummary = ref({
   b2oUsers: 0
 });
 const chartBreakdown = computed<DistributionGroup[]>(() => {
-  const groups = new Map<string, number[]>();
+  const groups = new Map<string, DistributionGroup>();
 
   for (const client of clients.value) {
-    const label = String(client.segment || client.country || "Sin segmento").trim() || "Sin segmento";
+    const label = String(client.name || client.email || client.id || "Unknown user").trim() || "Unknown user";
     const value = Number(client.interactions || 0);
     if (!Number.isFinite(value)) continue;
-    if (!groups.has(label)) groups.set(label, []);
-    groups.get(label)?.push(value);
+    groups.set(client.id, {
+      label,
+      color: distributionPalette[groups.size % distributionPalette.length],
+      total: value
+    });
   }
 
-  return [...groups.entries()]
-    .sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
-    .slice(0, distributionPalette.length)
-    .map(([label, values], index) => {
-      const normalized = values.filter((value) => Number.isFinite(value));
-      const density = buildDensity(normalized);
-      return {
-        label,
-        color: distributionPalette[index % distributionPalette.length],
-        values: normalized,
-        density,
-        points: normalized
-      };
-    });
+  return [...groups.values()]
+    .sort((left, right) => right.total - left.total || left.label.localeCompare(right.label))
+    .slice(0, 12);
 });
 const distributionSummary = computed(() => {
-  const allValues = chartBreakdown.value.flatMap((group) => group.values);
-  const average = allValues.length ? allValues.reduce((sum, value) => sum + value, 0) / allValues.length : 0;
+  const totals = clients.value.map((client) => Number(client.interactions || 0)).filter((value) => Number.isFinite(value));
+  const average = totals.length ? totals.reduce((sum, value) => sum + value, 0) / totals.length : 0;
   const topSegment = chartBreakdown.value[0]?.label || "No data";
 
   return {
@@ -622,10 +612,7 @@ const distributionChartSeries = computed(() => {
     name: "Interactions",
     data: chartBreakdown.value.map((group) => ({
       x: group.label,
-      y: {
-        density: group.density,
-        points: group.points
-      },
+      y: group.total,
       fillColor: group.color
     }))
   }];
@@ -633,7 +620,7 @@ const distributionChartSeries = computed(() => {
 const distributionChartOptions = computed<ApexOptions>(() => {
   return {
     chart: {
-      type: "violin" as const,
+      type: "bar" as const,
       height: 420,
       toolbar: { show: false },
       zoom: { enabled: false },
@@ -652,28 +639,18 @@ const distributionChartOptions = computed<ApexOptions>(() => {
     colors: chartBreakdown.value.map((group) => group.color),
     dataLabels: { enabled: false },
     legend: { show: false },
-    stroke: {
-      width: 0
-    },
     fill: {
       opacity: 0.92,
       colors: chartBreakdown.value.map((group) => group.color)
     },
     plotOptions: {
-      violin: {
-        normalize: "group",
-        bandwidthScale: 1.15,
-        points: {
-          show: true,
-          shape: "circle",
-          size: 4,
-          jitter: 0.38,
-          constrainToViolin: true,
-          maxPoints: 250,
-          opacity: 0.85,
-          fillColor: "series-dark",
-          strokeColor: "#ffffff",
-          strokeWidth: 1
+      bar: {
+        horizontal: true,
+        borderRadius: 12,
+        barHeight: "70%",
+        distributed: true,
+        dataLabels: {
+          position: "top"
         }
       }
     },
@@ -684,7 +661,7 @@ const distributionChartOptions = computed<ApexOptions>(() => {
       yaxis: { lines: { show: true } }
     },
     xaxis: {
-      type: "category",
+      type: "numeric",
       labels: {
         style: {
           colors: "#6c7a92",
@@ -694,12 +671,18 @@ const distributionChartOptions = computed<ApexOptions>(() => {
       },
       axisBorder: { show: false },
       axisTicks: { show: false },
-      tooltip: { enabled: false }
+      tooltip: { enabled: false },
+      title: {
+        text: "Answers",
+        style: {
+          color: "#44546b",
+          fontWeight: 700
+        }
+      }
     },
     yaxis: {
-      min: 0,
       title: {
-        text: "Interactions per client",
+        text: undefined,
         style: {
           color: "#44546b",
           fontWeight: 700
