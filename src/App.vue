@@ -302,19 +302,85 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Agent</th><th>Area</th><th>Status</th><th>Type</th><th>Clients with activity</th><th>Conversations</th><th>Last activity</th></tr></thead>
+              <thead><tr><th>Agent</th><th>Area</th><th>Status</th><th>Type</th><th>Repos</th><th>7-day calls</th><th>Clients with activity</th><th>Conversations</th><th>Last activity</th></tr></thead>
               <tbody>
-                <tr v-for="agent in filteredAgents" :key="agent.id">
+                <tr
+                  v-for="agent in filteredAgents"
+                  :key="agent.id"
+                  class="agent-row"
+                  :class="{ 'agent-row--selected': agent.id === selectedAgentId }"
+                  @click="openAgent(agent.id)"
+                >
                   <td>{{ agent.name }}</td>
                   <td><span class="area-chip" :class="areaClass(agent.area)">{{ agent.area }}</span></td>
-                  <td><span class="status-chip status-chip--completed">{{ agent.status }}</span></td>
+                  <td><span class="status-chip" :class="agent.archived ? 'status-chip--failed' : 'status-chip--completed'">{{ agent.archived ? 'Archived' : agent.status }}</span></td>
                   <td>{{ agent.type }}</td>
+                  <td>
+                    <span v-if="agent.repoMatches?.length" class="repo-list">
+                      <span v-for="repo in agent.repoMatches.slice(0, 2)" :key="repo" class="repo-chip">{{ repo }}</span>
+                      <span v-if="agent.repoMatches.length > 2" class="repo-chip repo-chip--more">+{{ agent.repoMatches.length - 2 }}</span>
+                    </span>
+                    <span v-else class="repo-chip repo-chip--empty">No repo mapped</span>
+                  </td>
+                  <td>{{ agent.last7DayCallCount ?? 0 }}</td>
                   <td>{{ agent.clientsWithActivity }}</td>
                   <td>{{ agent.conversations }}</td>
                   <td>{{ agent.lastActivity }}</td>
                 </tr>
               </tbody>
             </table>
+          </div>
+        </section>
+        <section v-if="selectedAgent" class="panel agent-detail-panel">
+          <div class="table-toolbar">
+            <div>
+              <h2>{{ selectedAgent.name }}</h2>
+              <p>{{ selectedAgent.purpose }}</p>
+            </div>
+            <div class="agent-detail-meta">
+              <span class="repo-chip" v-for="repo in (selectedAgent.repoMatches || []).slice(0, 3)" :key="repo">{{ repo }}</span>
+            </div>
+          </div>
+          <div class="metric-row">
+            <article class="stat-card">
+              <span>7-day calls</span>
+              <strong>{{ selectedAgent.last7DayCallCount ?? 0 }}</strong>
+              <p>Live activity from ElevenLabs</p>
+            </article>
+            <article class="stat-card">
+              <span>Responses</span>
+              <strong>{{ selectedAgentResponseCount }}</strong>
+              <p>Recent recommendation events</p>
+            </article>
+            <article class="stat-card">
+              <span>Accepted</span>
+              <strong>{{ selectedAgentAcceptedCount }}</strong>
+              <p>Responses marked as accepted</p>
+            </article>
+            <article class="stat-card">
+              <span>Last activity</span>
+              <strong>{{ selectedAgent.lastCallAt || "No activity" }}</strong>
+              <p>{{ selectedAgent.trustContext || "unknown" }}</p>
+            </article>
+          </div>
+          <div v-if="isLoadingAgentResponses" class="data-alert data-alert--loading">Loading agent responses...</div>
+          <div v-else-if="!selectedAgentResponses.length" class="data-alert">No responses found yet for this agent.</div>
+          <div v-else class="agent-response-list">
+            <article v-for="response in selectedAgentResponses" :key="response.id" class="agent-response-card">
+              <div class="agent-response-card__header">
+                <strong>{{ response.title || response.responseText || "Agent response" }}</strong>
+                <span class="status-chip" :class="response.accepted ? 'status-chip--completed' : 'status-chip--progress'">
+                  {{ response.accepted ? "Accepted" : "Pending" }}
+                </span>
+              </div>
+              <p>{{ response.responseText || response.feedback || "No response text available." }}</p>
+              <div class="agent-response-card__meta">
+                <span v-if="response.goal">{{ response.goal }}</span>
+                <span v-if="response.rewardType">{{ response.rewardType }}</span>
+                <span v-if="response.rewardAlgorithm">{{ response.rewardAlgorithm }}</span>
+                <span>{{ formatDate(response.createdAt) }}</span>
+              </div>
+            </article>
           </div>
         </section>
       </section>
@@ -462,6 +528,47 @@ type Agent = {
   conversations: number;
   lastActivity: string;
   purpose: string;
+  repoMatches?: string[];
+  lastCallAt?: string;
+  last7DayCallCount?: number;
+  archived?: boolean;
+  trustContext?: string;
+};
+
+type ElevenLabsAgent = {
+  agentId: string;
+  name: string;
+  tags: string[];
+  createdAtUnixSecs?: number;
+  lastCallTimeUnixSecs?: number | null;
+  archived?: boolean;
+  last7DayCallCount?: number;
+  hasCoaching?: boolean;
+  trustContext?: string;
+  repoMatches?: string[];
+};
+
+type AgentResponse = {
+  id: string;
+  branchId?: string;
+  businessId?: string | null;
+  agentId: string;
+  conversationId?: string | null;
+  recommendationId?: string | null;
+  accepted: boolean;
+  feedback?: string | null;
+  responseText?: string | null;
+  conversationSummary?: string | null;
+  aiPrompt?: string | null;
+  goal?: string | null;
+  goalDescription?: string | null;
+  rewardType?: string | null;
+  rewardAlgorithm?: string | null;
+  rewardKind?: string | null;
+  subtype?: string | null;
+  title?: string | null;
+  description?: string | null;
+  createdAt?: string;
 };
 
 type TranscriptRow = { timestamp: string; speaker: "Pigui" | string; message: string };
@@ -560,6 +667,9 @@ const transcriptContext = ref<"clients" | "conversations">("conversations");
 const clientSearch = ref("");
 const conversationSearch = ref("");
 const agentSearch = ref("");
+const selectedAgentId = ref("");
+const selectedAgentResponses = ref<AgentResponse[]>([]);
+const isLoadingAgentResponses = ref(false);
 const isLoadingData = ref(false);
 const dashboardError = ref("");
 const authToken = ref(localStorage.getItem("pigui_dashboard_token") || "");
@@ -811,6 +921,7 @@ const demoInsights = [
 
 const clients = ref<Client[]>([]);
 const conversations = ref<Conversation[]>([]);
+const elevenLabsAgents = ref<ElevenLabsAgent[]>([]);
 const insights = ref<Array<{ id: string; type: string; insight: string; area: Area; sourceAgent: string; relatedClients: number; priority: string; date: string }>>([]);
 
 const integrations = [
@@ -864,6 +975,7 @@ const apiPost = async <T,>(path: string, payload: unknown): Promise<T> => {
 const inferAgent = (text = "") => {
   const normalized = text.toLowerCase();
   if (normalized.includes("reward") && normalized.includes("feedback")) return agentCatalog[6];
+  if (normalized.includes("customer") && normalized.includes("baseline")) return agentCatalog[5];
   if (normalized.includes("consumer") || normalized.includes("reward")) return agentCatalog[5];
   if (normalized.includes("scan") || normalized.includes("qr")) return agentCatalog[7];
   if (normalized.includes("financial") || normalized.includes("dashboard")) return agentCatalog[4];
@@ -871,6 +983,30 @@ const inferAgent = (text = "") => {
   if (normalized.includes("feedback") || normalized.includes("friction") || normalized.includes("confus")) return agentCatalog[2];
   if (normalized.includes("website") || normalized.includes("web")) return agentCatalog[0];
   return agentCatalog[1];
+};
+const formatUnixDate = (value?: number | null) => {
+  if (!value) return "No activity";
+  return formatDate(new Date(value * 1000).toISOString());
+};
+const buildAgentFromElevenLabs = (agent: ElevenLabsAgent, index: number): Agent => {
+  const template = inferAgent(agent.name);
+  const step = template.step || String(index + 1).padStart(2, "0");
+  return {
+    ...template,
+    id: agent.agentId,
+    step,
+    name: agent.name,
+    status: "Active",
+    conversations: 0,
+    clientsWithActivity: 0,
+    lastActivity: formatUnixDate(agent.lastCallTimeUnixSecs),
+    purpose: template.purpose,
+    repoMatches: agent.repoMatches || [],
+    lastCallAt: formatUnixDate(agent.lastCallTimeUnixSecs),
+    last7DayCallCount: agent.last7DayCallCount || 0,
+    archived: Boolean(agent.archived),
+    trustContext: agent.trustContext || "unknown"
+  };
 };
 const buildTranscript = (answers: Array<{ question?: string; answer?: string; order?: number }>, clientName: string): TranscriptRow[] =>
   answers.flatMap((answer, index) => {
@@ -880,6 +1016,30 @@ const buildTranscript = (answers: Array<{ question?: string; answer?: string; or
       { timestamp: `${timestamp}:30`, speaker: clientName, message: answer.answer || "No answer captured" }
     ];
   });
+const loadAgentResponses = async (agentId: string) => {
+  if (USE_DEMO_DATA) {
+    selectedAgentResponses.value = [];
+    return;
+  }
+  if (!agentId) {
+    selectedAgentResponses.value = [];
+    return;
+  }
+  isLoadingAgentResponses.value = true;
+  try {
+    const result = await apiGet<{ agentId: string; count: number; acceptedCount: number; responses: AgentResponse[] }>(
+      `/api/elevenlabs/agents/${agentId}/responses?limit=12`
+    );
+    selectedAgentResponses.value = result.responses || [];
+  } catch (error) {
+    selectedAgentResponses.value = [];
+    if (error instanceof Error) {
+      dashboardError.value = dashboardError.value || error.message;
+    }
+  } finally {
+    isLoadingAgentResponses.value = false;
+  }
+};
 const containsFriction = (text: string) => /confus|difficult|hard|slow|bug|error|issue|problem|friction|unclear|no entend|dif[ií]cil|lento/i.test(text);
 const mapStatus = (status?: string): Conversation["status"] => {
   if (status === "completed") return "Completed";
@@ -1043,7 +1203,7 @@ const loadProductionData = async () => {
       return;
     }
     const days = daysFromRange();
-    const [summary, users] = await Promise.all([
+    const [summary, users, agentDirectory] = await Promise.all([
       apiGet<typeof apiSummary.value>(`/api/summary?days=${days}`),
       apiGet<Array<{
         userId: string;
@@ -1057,9 +1217,19 @@ const loadProductionData = async () => {
         channel?: string;
         deviceName?: string;
         segment?: string;
-      }>>(`/api/users?days=${days}`)
+      }>>(`/api/users?days=${days}`),
+      apiGet<{ agents: ElevenLabsAgent[] }>("/api/elevenlabs/agents").catch(() => ({ agents: [] }))
     ]);
     apiSummary.value = summary;
+    elevenLabsAgents.value = agentDirectory.agents || [];
+    if (!selectedAgentId.value || !activeAgentCatalog.value.some((agent) => agent.id === selectedAgentId.value)) {
+      selectedAgentId.value = activeAgentCatalog.value[0]?.id || "";
+    }
+    if (selectedAgentId.value) {
+      await loadAgentResponses(selectedAgentId.value);
+    } else {
+      selectedAgentResponses.value = [];
+    }
     clients.value = users.map((user) => {
       const completed = user.completedSessions > 0;
       return {
@@ -1102,6 +1272,9 @@ const loadProductionData = async () => {
 const selectedClient = computed(() => clients.value.find((client) => client.id === selectedClientId.value));
 const selectedConversation = computed(() => conversations.value.find((conversation) => conversation.id === selectedConversationId.value));
 const selectedClientConversations = computed(() => conversations.value.filter((conversation) => conversation.clientId === selectedClientId.value));
+const selectedAgent = computed(() => activeAgentCatalog.value.find((agent) => agent.id === selectedAgentId.value));
+const selectedAgentResponseCount = computed(() => selectedAgentResponses.value.length);
+const selectedAgentAcceptedCount = computed(() => selectedAgentResponses.value.filter((response) => response.accepted).length);
 const authAdminId = computed(() => adminUsers.value.find((admin) => admin.email === settings.value.adminEmail)?.id || adminUsers.value[0]?.id || "");
 const showDateSelector = computed(() => route.value === "dashboard" || route.value === "conversations");
 const pageTitle = computed(() => {
@@ -1111,14 +1284,20 @@ const pageTitle = computed(() => {
   return label(activeNav.value);
 });
 
+const activeAgentCatalog = computed<Agent[]>(() =>
+  elevenLabsAgents.value.length
+    ? elevenLabsAgents.value.map((agent, index) => buildAgentFromElevenLabs(agent, index))
+    : agentCatalog
+);
+
 const agents = computed<Agent[]>(() =>
-  agentCatalog.map((agent) => {
+  activeAgentCatalog.value.map((agent) => {
     const agentConversations = conversations.value.filter((conversation) => conversation.agent === agent.name);
     return {
       ...agent,
       conversations: agentConversations.length,
       clientsWithActivity: new Set(agentConversations.map((conversation) => conversation.clientId)).size,
-      lastActivity: agentConversations[0]?.date || "No activity"
+      lastActivity: agentConversations[0]?.date || agent.lastActivity || "No activity"
     };
   })
 );
@@ -1128,7 +1307,7 @@ const overviewMetrics = computed(() => [
   { title: "Pigui Scan", value: formatNumber(apiSummary.value.b2oUsers), detail: "users · B2O segment", color: "b2o" },
   { title: "Pigui Rewards", value: formatNumber(apiSummary.value.b2cUsers), detail: "users · B2C segment", color: "b2c" },
   { title: "Clients", value: formatNumber(apiSummary.value.users), detail: "active in selected period" },
-  { title: "Pigui Agents", value: formatNumber(agentCatalog.length), detail: "active · Across the ecosystem" },
+  { title: "Pigui Agents", value: formatNumber(activeAgentCatalog.value.length), detail: "active · Across the ecosystem" },
   { title: "Conversations", value: formatNumber(apiSummary.value.sessions), detail: "sessions · Generated in this period" },
   { title: "Completed Sessions", value: formatNumber(apiSummary.value.completedSessions), detail: "completed · Across the ecosystem" }
 ]);
@@ -1145,7 +1324,7 @@ const conversationMetrics = computed(() => [
   { title: "Conversations with friction", value: formatNumber(conversations.value.filter((conversation) => conversation.friction === "Yes").length), detail: "With detected friction signals" }
 ]);
 const agentMetrics = computed(() => [
-  { title: "Total agents", value: formatNumber(agentCatalog.length), detail: "Available across the ecosystem" },
+  { title: "Total agents", value: formatNumber(activeAgentCatalog.value.length), detail: "Available across the ecosystem" },
   { title: "Active agents", value: formatNumber(agents.value.filter((agent) => agent.conversations > 0).length), detail: "With loaded activity" },
   { title: "Conversations", value: formatNumber(apiSummary.value.sessions), detail: "Generated in this period" },
   { title: "Clients with activity", value: formatNumber(apiSummary.value.users), detail: "With agent interaction" }
@@ -1181,7 +1360,7 @@ const filteredConversations = computed(() => {
 const filteredAgents = computed(() => {
   const term = agentSearch.value.toLowerCase().trim();
   return agents.value.filter((agent) => {
-    const matchesTerm = !term || `${agent.name} ${agent.area} ${agent.type}`.toLowerCase().includes(term);
+    const matchesTerm = !term || `${agent.name} ${agent.area} ${agent.type} ${(agent.repoMatches || []).join(" ")}`.toLowerCase().includes(term);
     const matchesArea = agentFilters.value.area === "All areas" || agent.area === agentFilters.value.area;
     const matchesStatus = agentFilters.value.status === "All statuses" || agent.status === agentFilters.value.status;
     const matchesType = agentFilters.value.type === "All types" || agent.type === agentFilters.value.type;
@@ -1208,6 +1387,10 @@ const openClientConversations = (clientId: string) => {
   route.value = "client-conversations";
   setPath(routePath("client-conversations", clientId));
   void loadClientDetail(clientId).then(buildInsights);
+};
+const openAgent = (agentId: string) => {
+  selectedAgentId.value = agentId;
+  void loadAgentResponses(agentId);
 };
 const openTranscript = (conversationId: string) => {
   selectedConversationId.value = conversationId;

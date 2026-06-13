@@ -26,6 +26,8 @@ steps:
       - PGSSL=true
       - --set-secrets
       - DATABASE_URL=DATABASE_URL:latest
+      - --set-secrets
+      - ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest
 substitutions:
   _REGION: europe-west1
   _REPOSITORY: pigui-services

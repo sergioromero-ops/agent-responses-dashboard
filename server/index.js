@@ -128,6 +128,67 @@ const emptySummary = () => ({
   b2oUsers: 0
 });
 
+const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY || "";
+const elevenLabsAgentRepoMap = {
+  agent_0601ksnyvhg6fa0vp7ydgrzxgbnb: ["chat-web", "chatIA", "front-b2b"],
+  agent_0001kqevremcepzs5cvr1d59m5tc: ["front-b2b", "chatIA", "generic-app-2"],
+  agent_0201kt2qjxm4eb2tk55r5nc0wyxk: ["feedbackonboarding", "generic-app-1"],
+  agent_0501ksrat1xaebna1f4b2y7mdj28: ["chatfeedback"],
+  agent_9501kt7fdp6bfkhrhegv8066pn90: ["chat-dashboard"],
+  agent_9601ktx4cewyfsv8rs14qspks7s7: ["B20-Talk-chat-to-pigui-Pigui-Scan-feedback"],
+  agent_4201ktq1sx3bexyvhq435sy651wk: ["generic-app-4"],
+  agent_7501ktq1s7vffzavk46k6090zhbq: ["generic-app-3"],
+  agent_2701ktsx7hcnevz97jzj2y32f1v7: [],
+  agent_3701ktthtwvgfnx8hvpveyh8xth1: [],
+  agent_2401ksqscapnfx2r5ty736hwfq4h: [],
+  agent_5701ksr0e815e1badfnwmvwfqbcm: [],
+  agent_6401ksgemanxe7na1yq3bmk3j9pg: []
+};
+
+const normalizeRepoMatches = (agentId, agentName) => {
+  const mapped = elevenLabsAgentRepoMap[agentId] || [];
+  if (mapped.length) return mapped;
+  const name = String(agentName || "").toLowerCase();
+  if (name.includes("scan")) return ["B20-Talk-chat-to-pigui-Pigui-Scan-feedback"];
+  if (name.includes("website")) return ["front-b2b", "chat-web", "chatIA"];
+  if (name.includes("rewards") || name.includes("consumer")) return ["generic-app-1", "generic-app-2", "generic-app-3", "generic-app-4", "feedbackonboarding", "chatfeedback"];
+  if (name.includes("branch") || name.includes("dashboard")) return ["front-b2b", "api-pigui-backend", "api-pigui-backend-fix", "agent-responses-dashboard"];
+  return [];
+};
+
+const fetchElevenLabsAgents = async () => {
+  if (!elevenLabsApiKey) {
+    return [];
+  }
+
+  const response = await fetch("https://api.elevenlabs.io/v1/convai/agents", {
+    headers: {
+      "xi-api-key": elevenLabsApiKey
+    }
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`ElevenLabs agents request failed: ${response.status} ${detail}`);
+  }
+
+  const payload = await response.json();
+  const agents = Array.isArray(payload?.agents) ? payload.agents : [];
+  return agents.map((agent) => ({
+    agentId: agent.agent_id,
+    name: agent.name,
+    tags: agent.tags || [],
+    createdAtUnixSecs: agent.created_at_unix_secs,
+    lastCallTimeUnixSecs: agent.last_call_time_unix_secs,
+    archived: Boolean(agent.archived),
+    last7DayCallCount: Number(agent.last_7_day_call_count || 0),
+    hasCoaching: Boolean(agent.has_coaching),
+    trustContext: agent.trust_context || "unknown",
+    accessInfo: agent.access_info || null,
+    repoMatches: normalizeRepoMatches(agent.agent_id, agent.name)
+  }));
+};
+
 const requireDb = (res) => {
   if (pool) return true;
   res.status(503).json({
@@ -151,6 +212,112 @@ app.get("/api/health", async (_req, res) => {
   }
 
   res.json({ ok: true, databaseConfigured: hasDb, databaseConnected: connected });
+});
+
+app.get("/api/elevenlabs/agents", async (_req, res, next) => {
+  try {
+    const agents = await fetchElevenLabsAgents();
+    res.json({
+      source: "elevenlabs",
+      count: agents.length,
+      agents
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/elevenlabs/agents/:agentId/responses", async (req, res, next) => {
+  if (!requireDb(res)) return;
+
+  try {
+    const agentId = String(req.params.agentId || "").trim();
+    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100);
+
+    if (!agentId || !(await tableExists("business.ai_recommendation_events"))) {
+      res.json({ agentId, count: 0, responses: [] });
+      return;
+    }
+
+    const result = await pool.query(
+      `
+        select
+          id::text,
+          branch_id::text as branch_id,
+          business_id,
+          agent_id,
+          conversation_id,
+          recommendation_id,
+          accepted,
+          feedback,
+          coalesce(
+            nullif(feedback, ''),
+            nullif(payload->>'conversation_summary', ''),
+            nullif(payload->>'ai_prompt', ''),
+            nullif(payload->>'description', ''),
+            nullif(payload->>'goal_description', ''),
+            nullif(payload->>'goal', '')
+          ) as response_text,
+          payload->>'conversation_summary' as conversation_summary,
+          payload->>'ai_prompt' as ai_prompt,
+          payload->>'goal' as goal,
+          payload->>'goal_description' as goal_description,
+          payload->>'reward_type' as reward_type,
+          payload->>'reward_algorithm' as reward_algorithm,
+          payload->>'reward_kind' as reward_kind,
+          payload->>'subtype' as subtype,
+          payload->>'title' as title,
+          payload->>'description' as description,
+          created_at
+        from business.ai_recommendation_events
+        where agent_id = $1
+        order by created_at desc
+        limit $2
+      `,
+      [agentId, limit]
+    );
+
+    const counts = await pool.query(
+      `
+        select
+          count(*)::int as total,
+          count(*) filter (where accepted = true)::int as accepted
+        from business.ai_recommendation_events
+        where agent_id = $1
+      `,
+      [agentId]
+    );
+
+    res.json({
+      agentId,
+      count: counts.rows[0]?.total || 0,
+      acceptedCount: counts.rows[0]?.accepted || 0,
+      responses: result.rows.map((row) => ({
+        id: row.id,
+        branchId: row.branch_id,
+        businessId: row.business_id,
+        agentId: row.agent_id,
+        conversationId: row.conversation_id,
+        recommendationId: row.recommendation_id,
+        accepted: row.accepted,
+        feedback: row.feedback,
+        responseText: row.response_text,
+        conversationSummary: row.conversation_summary,
+        aiPrompt: row.ai_prompt,
+        goal: row.goal,
+        goalDescription: row.goal_description,
+        rewardType: row.reward_type,
+        rewardAlgorithm: row.reward_algorithm,
+        rewardKind: row.reward_kind,
+        subtype: row.subtype,
+        title: row.title,
+        description: row.description,
+        createdAt: row.created_at
+      }))
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/auth/sign-in", async (req, res, next) => {

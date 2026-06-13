@@ -30,6 +30,7 @@ Variables necesarias:
 
 ```bash
 DATABASE_URL='postgresql://user:password@host:5432/database'
+ELEVENLABS_API_KEY='sk_...'
 PGSSL=true
 ```
 
