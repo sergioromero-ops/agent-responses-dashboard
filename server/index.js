@@ -728,10 +728,10 @@ app.get("/api/users", async (req, res, next) => {
         join profile on profile.user_id = sm.user_id
         left join latest_device ld on ld.user_id = sm.user_id
         left join source_counts on source_counts.user_id = sm.user_id
-        where $2::text = ''
-          or sm.user_id::text ilike '%' || $2::text || '%'
-          or coalesce(profile.email, '') ilike '%' || $2::text || '%'
-          or coalesce(profile.display_name, '') ilike '%' || $2::text || '%'
+        where $3::text = ''
+          or sm.user_id::text ilike '%' || $3::text || '%'
+          or coalesce(profile.email, '') ilike '%' || $3::text || '%'
+          or coalesce(profile.display_name, '') ilike '%' || $3::text || '%'
         order by last_activity_at desc
         limit 100
       `,
