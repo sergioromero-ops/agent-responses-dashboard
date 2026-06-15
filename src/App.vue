@@ -187,7 +187,7 @@
           </article>
         </div>
 
-        <section class="panel">
+        <section class="panel insights-table-panel">
           <div class="table-toolbar">
             <h2>Clients</h2>
             <input v-model="clientSearch" type="search" placeholder="Search by name, email or phone" />
@@ -440,6 +440,27 @@
       </section>
 
       <section v-else-if="route === 'insights'" class="page-stack">
+        <section class="panel insights-hero">
+          <div class="insights-hero__copy">
+            <span class="ai-kicker">AI synthesis</span>
+            <h2>Conversation intelligence</h2>
+            <p>{{ insightAiReport.summary }}</p>
+            <div class="insight-pill-row">
+              <span v-for="signal in insightAiReport.signals" :key="signal.label" class="insight-pill">
+                <strong>{{ signal.label }}</strong>
+                <small>{{ signal.value }}</small>
+              </span>
+            </div>
+          </div>
+          <div class="insights-score" :class="`insights-score--${insightAiReport.score.tone}`">
+            <span>AI score</span>
+            <strong>{{ insightAiReport.score.value }}</strong>
+            <small>{{ insightAiReport.score.label }}</small>
+            <div class="score-meter" aria-hidden="true">
+              <i :style="{ width: `${insightAiReport.score.value}%` }"></i>
+            </div>
+          </div>
+        </section>
         <div class="metric-row">
           <article v-for="metric in insightMetrics" :key="metric.title" class="stat-card">
             <span>{{ metric.title }}</span>
@@ -456,17 +477,30 @@
           </section>
         </div>
         <section class="panel">
-          <h2>Insights table</h2>
+          <div class="table-toolbar">
+            <div>
+              <h2>Insights table</h2>
+              <p>AI-ranked findings with confidence, score and context.</p>
+            </div>
+            <span class="table-toolbar__badge">{{ insightAiReport.topInsight ? insightAiReport.topInsight.type : "AI" }}</span>
+          </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Type</th><th>Insight</th><th>Area</th><th>Source agent</th><th>Related clients</th><th>Priority</th><th>Date</th></tr></thead>
+              <thead><tr><th>Type</th><th>Insight</th><th>Confidence</th><th>Area</th><th>Source agent</th><th>Related clients</th><th>Score</th><th>Priority</th><th>Date</th></tr></thead>
               <tbody>
                 <tr v-for="insight in insights" :key="insight.id">
-                  <td>{{ insight.type }}</td>
-                  <td>{{ insight.insight }}</td>
+                  <td><span class="insight-type-chip" :class="`insight-type-chip--${insight.type.toLowerCase()}`">{{ insight.type }}</span></td>
+                  <td>
+                    <div class="insight-cell">
+                      <strong>{{ insight.insight }}</strong>
+                      <span>{{ insight.evidence }}</span>
+                    </div>
+                  </td>
+                  <td><span class="confidence-chip" :class="`confidence-chip--${insight.confidence.toLowerCase().includes('high') ? 'high' : insight.confidence.toLowerCase().includes('medium') ? 'medium' : 'low'}`">{{ insight.confidence }}</span></td>
                   <td><span class="area-chip" :class="areaClass(insight.area)">{{ insight.area }}</span></td>
                   <td>{{ insight.sourceAgent }}</td>
                   <td>{{ insight.relatedClients }}</td>
+                  <td><span class="score-chip" :class="`score-chip--${insight.score >= 82 ? 'strong' : insight.score >= 65 ? 'watch' : 'risk'}`">{{ insight.score }}</span></td>
                   <td><span class="priority" :class="`priority--${insight.priority.toLowerCase()}`">{{ insight.priority }}</span></td>
                   <td>{{ insight.date }}</td>
                 </tr>
@@ -703,6 +737,7 @@ type ConversationInsight = {
   type: "Finding" | "Friction" | "Opportunity";
   title: string;
   detail: string;
+  score: number;
   confidence: string;
   evidence?: string;
   recommendation?: string;
@@ -722,6 +757,20 @@ type ConversationInsightReport = {
   score: ConversationInsightScore;
   signals: ConversationInsightSignal[];
   insights: ConversationInsight[];
+};
+type InsightRecord = {
+  id: string;
+  type: "Finding" | "Friction" | "Opportunity";
+  insight: string;
+  area: Area;
+  sourceAgent: string;
+  relatedClients: number;
+  priority: string;
+  date: string;
+  confidence: string;
+  score: number;
+  evidence: string;
+  recommendation: string;
 };
 type AdminUser = {
   id: string;
@@ -1051,18 +1100,83 @@ const demoConversations: Conversation[] = demoClients.flatMap((client, index) =>
     transcript: demoTranscript(client.name)
   }))
 );
-const demoInsights = [
-  { id: "i1", type: "Finding", insight: "B2B concentrates most conversation activity.", area: "B2B" as Area, sourceAgent: "Personal & Business Baseline Agent", relatedClients: 127, priority: "Medium", date: "08 Jun 2026" },
-  { id: "i2", type: "Friction", insight: "Some customers do not understand why baseline questions are needed.", area: "B2B" as Area, sourceAgent: "Onboarding Feedback Agent", relatedClients: 42, priority: "High", date: "08 Jun 2026" },
-  { id: "i3", type: "Opportunity", insight: "Improve the transition from Pigui Business to Pigui Scan.", area: "B2O" as Area, sourceAgent: "Scan Feedback Agent", relatedClients: 36, priority: "Medium", date: "07 Jun 2026" },
-  { id: "i4", type: "Friction", insight: "Rewards redemption flow needs clearer explanation.", area: "B2C" as Area, sourceAgent: "Rewards Feedback Agent", relatedClients: 29, priority: "High", date: "07 Jun 2026" },
-  { id: "i5", type: "Finding", insight: "Feedback Overview helps consolidate signals from Business, Scan and Rewards.", area: "B2B" as Area, sourceAgent: "Feedback Overview Agent", relatedClients: 64, priority: "Low", date: "06 Jun 2026" }
+const demoInsights: InsightRecord[] = [
+  {
+    id: "i1",
+    type: "Finding",
+    insight: "B2B concentrates most conversation activity.",
+    area: "B2B",
+    sourceAgent: "Personal & Business Baseline Agent",
+    relatedClients: 127,
+    priority: "Medium",
+    confidence: "High confidence",
+    score: 86,
+    evidence: "B2B remains the most active area in the current period.",
+    recommendation: "Use B2B as the primary lens for weekly reviews.",
+    date: "08 Jun 2026"
+  },
+  {
+    id: "i2",
+    type: "Friction",
+    insight: "Some customers do not understand why baseline questions are needed.",
+    area: "B2B",
+    sourceAgent: "Onboarding Feedback Agent",
+    relatedClients: 42,
+    priority: "High",
+    confidence: "High confidence",
+    score: 91,
+    evidence: "Multiple onboarding sessions include clarification language.",
+    recommendation: "Tighten the onboarding prompt and explain why the questions matter earlier.",
+    date: "08 Jun 2026"
+  },
+  {
+    id: "i3",
+    type: "Opportunity",
+    insight: "Improve the transition from Pigui Business to Pigui Scan.",
+    area: "B2O",
+    sourceAgent: "Scan Feedback Agent",
+    relatedClients: 36,
+    priority: "Medium",
+    confidence: "Medium confidence",
+    score: 74,
+    evidence: "Scan feedback appears after business context without a strong handoff.",
+    recommendation: "Add a transition card that confirms what happens next.",
+    date: "07 Jun 2026"
+  },
+  {
+    id: "i4",
+    type: "Friction",
+    insight: "Rewards redemption flow needs clearer explanation.",
+    area: "B2C",
+    sourceAgent: "Rewards Feedback Agent",
+    relatedClients: 29,
+    priority: "High",
+    confidence: "High confidence",
+    score: 88,
+    evidence: "Redemption questions spike when users hit the rewards stage.",
+    recommendation: "Rewrite the rewards explanation with one concrete example.",
+    date: "07 Jun 2026"
+  },
+  {
+    id: "i5",
+    type: "Finding",
+    insight: "Feedback Overview helps consolidate signals from Business, Scan and Rewards.",
+    area: "B2B",
+    sourceAgent: "Feedback Overview Agent",
+    relatedClients: 64,
+    priority: "Low",
+    confidence: "Medium confidence",
+    score: 71,
+    evidence: "Feedback across the journey is easier to compare once consolidated.",
+    recommendation: "Keep the overview agent as the central synthesis layer.",
+    date: "06 Jun 2026"
+  }
 ];
 
 const clients = ref<Client[]>([]);
 const conversations = ref<Conversation[]>([]);
 const elevenLabsAgents = ref<ElevenLabsAgent[]>([]);
-const insights = ref<Array<{ id: string; type: string; insight: string; area: Area; sourceAgent: string; relatedClients: number; priority: string; date: string }>>([]);
+const insights = ref<InsightRecord[]>([]);
 
 const integrations = [
   { name: "Internal database", description: "Stores clients, conversations, agents, transcripts and metrics." },
@@ -1231,38 +1345,86 @@ const buildInsights = () => {
     return acc;
   }, {});
   const topArea = Object.entries(areaCounts).sort((a, b) => b[1] - a[1])[0];
-  insights.value = [
-    ...(topArea ? [{
-      id: "area-concentration",
-      type: "Finding",
-      insight: `${topArea[0]} concentrates the highest conversation activity in the selected period.`,
-      area: topArea[0] as Area,
-      sourceAgent: "Internal database",
-      relatedClients: clients.value.length,
-      priority: "Medium",
-      date: formatDate(new Date().toISOString())
-    }] : []),
-    ...(frictionConversations.length ? [{
-      id: "friction-signals",
-      type: "Friction",
-      insight: `${frictionConversations.length} conversations include possible confusion, bug, friction or difficulty signals.`,
-      area: frictionConversations[0].area,
-      sourceAgent: frictionConversations[0].agent,
-      relatedClients: new Set(frictionConversations.map((conversation) => conversation.clientId)).size,
-      priority: "High",
-      date: frictionConversations[0].date
-    }] : []),
-    {
-      id: "recommendation-events",
-      type: "Finding",
-      insight: `${formatNumber(apiSummary.value.recommendationEvents)} recommendation events and ${formatNumber(apiSummary.value.acceptedRecommendations)} accepted recommendations are recorded.`,
-      area: "B2B",
-      sourceAgent: "AI Feedback",
-      relatedClients: apiSummary.value.users,
-      priority: "Low",
-      date: formatDate(new Date().toISOString())
-    }
-  ];
+  const totalConversations = Math.max(conversations.value.length, 1);
+  const frictionRate = frictionConversations.length / totalConversations;
+  const recommendationEvents = Math.max(apiSummary.value.recommendationEvents, 1);
+  const recommendationAcceptance = apiSummary.value.acceptedRecommendations / recommendationEvents;
+  const topAreaShare = topArea ? topArea[1] / totalConversations : 0;
+  const synthesizedSignalCount = 3 + (frictionConversations.length ? 1 : 0) + 1;
+  const coverageScore = Math.max(
+    45,
+    Math.min(
+      96,
+      Math.round(
+        72 +
+          topAreaShare * 18 -
+          frictionRate * 18 +
+          recommendationAcceptance * 12 +
+          Math.min(6, clients.value.length / 20)
+      )
+    )
+  );
+  const confidenceLabel = (score: number) => (score >= 82 ? "High confidence" : score >= 65 ? "Medium confidence" : "Low confidence");
+  const areaInsight: InsightRecord | null = topArea ? {
+    id: "area-concentration",
+    type: "Finding",
+    insight: `${topArea[0]} concentrates the highest conversation activity in the selected period.`,
+    area: topArea[0] as Area,
+    sourceAgent: "Internal database",
+    relatedClients: clients.value.length,
+    priority: topAreaShare >= 0.45 ? "High" : "Medium",
+    confidence: confidenceLabel(Math.round(60 + topAreaShare * 35)),
+    score: Math.round(58 + topAreaShare * 38),
+    evidence: `${topArea[1]} of ${totalConversations} conversations belong to ${topArea[0]}.`,
+    recommendation: `Use ${topArea[0]} as the default lens for workflow reviews and compare it against the other areas for gaps.`,
+    date: formatDate(new Date().toISOString())
+  } : null;
+  const frictionInsight: InsightRecord | null = frictionConversations.length ? {
+    id: "friction-signals",
+    type: "Friction",
+    insight: `${frictionConversations.length} conversations include possible confusion, bug, friction or difficulty signals.`,
+    area: frictionConversations[0].area,
+    sourceAgent: frictionConversations[0].agent,
+    relatedClients: new Set(frictionConversations.map((conversation) => conversation.clientId)).size,
+    priority: "High",
+    confidence: confidenceLabel(Math.round(72 + frictionRate * 30)),
+    score: Math.round(72 + frictionRate * 24),
+    evidence: `${Math.round(frictionRate * 100)}% of the loaded conversations are marked with friction.`,
+    recommendation: "Prioritize these sessions for prompt tuning and follow-up review.",
+    date: frictionConversations[0].date
+  } : null;
+  const recommendationType: InsightRecord["type"] = recommendationAcceptance >= 0.65 ? "Finding" : "Opportunity";
+  const recommendationInsight: InsightRecord = {
+    id: "recommendation-events",
+    type: recommendationType,
+    insight: `${formatNumber(apiSummary.value.recommendationEvents)} recommendation events and ${formatNumber(apiSummary.value.acceptedRecommendations)} accepted recommendations are recorded.`,
+    area: "B2B",
+    sourceAgent: "AI Feedback",
+    relatedClients: apiSummary.value.users,
+    priority: recommendationAcceptance >= 0.65 ? "Medium" : "High",
+    confidence: confidenceLabel(Math.round(55 + recommendationAcceptance * 40)),
+    score: Math.round(54 + recommendationAcceptance * 40),
+    evidence: `${formatNumber(apiSummary.value.acceptedRecommendations)} of ${formatNumber(apiSummary.value.recommendationEvents)} recommendations were accepted.`,
+    recommendation: recommendationAcceptance >= 0.65
+      ? "This is healthy, but you can still look for lower-performing agent prompts."
+      : "Increase recommendation clarity and reduce the gap between suggestion and acceptance.",
+    date: formatDate(new Date().toISOString())
+  };
+  const synthesisInsight: InsightRecord = {
+    id: "signal-balance",
+    type: "Opportunity",
+    insight: `${Object.values(areaCounts).filter((count) => count > 0).length} areas are currently active, with ${synthesizedSignalCount} AI signals synthesized from live conversations.`,
+    area: (topArea?.[0] || "B2B") as Area,
+    sourceAgent: "AI synthesis",
+    relatedClients: clients.value.length,
+    priority: "Low",
+    confidence: confidenceLabel(coverageScore),
+    score: coverageScore,
+    evidence: `Coverage blends area concentration, friction rate and recommendation acceptance into a single AI score.`,
+    recommendation: "Use this as the executive summary for the current time window.",
+    date: formatDate(new Date().toISOString())
+  };
+  insights.value = [areaInsight, frictionInsight, recommendationInsight, synthesisInsight].filter(Boolean) as InsightRecord[];
 };
 
 const normalizeTranscriptText = (value: string) =>
@@ -1305,6 +1467,7 @@ const buildConversationInsightReport = (conversation?: Conversation | null): Con
           type: "Friction",
           title: "No transcript content",
           detail: "This conversation has no transcript rows loaded yet.",
+          score: 0,
           confidence: "High confidence",
           recommendation: "Verify the ingestion job or conversation provider before making coaching decisions."
         }
@@ -1416,6 +1579,7 @@ const buildConversationInsightReport = (conversation?: Conversation | null): Con
       detail: topTheme?.score
         ? `The strongest cluster points to ${primaryIntent.toLowerCase()}, so this conversation should be reviewed through that lens instead of as a generic transcript.`
         : "The conversation does not expose a strong theme yet, which suggests Pigui may need one sharper discovery question.",
+      score: topTheme?.score ? Math.round(Math.min(95, 68 + topTheme.score * 8)) : 54,
       confidence: topTheme?.score && topTheme.score >= 2 ? "High confidence" : "Medium confidence",
       evidence: mainEvidence ? `${mainEvidence.speaker}: "${clipEvidence(mainEvidence.message)}"` : undefined,
       recommendation: topTheme?.score
@@ -1427,6 +1591,7 @@ const buildConversationInsightReport = (conversation?: Conversation | null): Con
       type: "Finding",
       title: "Conversation quality score",
       detail: `Estimated at ${score.value}/100 from friction language, response length, question cadence, empathy and next-step cues.`,
+      score: score.value,
       confidence: "Medium confidence",
       evidence: `${clientTurns} client turns, ${piguiTurns} Pigui turns, ${piguiQuestionCount} Pigui questions.`,
       recommendation: score.tone === "strong"
@@ -1446,6 +1611,7 @@ const buildConversationInsightReport = (conversation?: Conversation | null): Con
         : weakClientRows.length
           ? `${weakClientRows.length} client answer${weakClientRows.length === 1 ? "" : "s"} look vague, too short or misaligned with the question, which can make the transcript less useful for personalization.`
           : `The client asked ${clientQuestionCount} direct question${clientQuestionCount === 1 ? "" : "s"} while Pigui asked ${piguiQuestionCount}, which may mean the agent is answering without enough guided discovery.`,
+      score: frictionRows.length ? Math.min(94, 76 + frictionRows.length * 3) : weakClientRows.length ? Math.min(88, 68 + weakClientRows.length * 4) : Math.max(60, 64 - Math.min(12, clientQuestionCount)),
       confidence: frictionRows.length || weakClientRows.length >= 2 ? "High confidence" : "Medium confidence",
       evidence: frictionEvidence ? `${frictionEvidence.speaker}: "${clipEvidence(frictionEvidence.message)}"` : `${clientQuestionCount} client questions detected.`,
       recommendation: frictionRows.length
@@ -1460,6 +1626,7 @@ const buildConversationInsightReport = (conversation?: Conversation | null): Con
       type: "Opportunity",
       title: "Low-friction flow",
       detail: "No explicit confusion, error, frustration or weak-answer pattern was detected.",
+      score: Math.max(62, Math.min(86, 72 + positiveSignals * 2)),
       confidence: "Medium confidence",
       evidence: positiveSignals ? `${positiveSignals} positive or cooperative cue${positiveSignals === 1 ? "" : "s"} detected.` : undefined,
       recommendation: "Preserve this flow, but still add a final confirmation question to catch hidden objections."
@@ -1472,6 +1639,7 @@ const buildConversationInsightReport = (conversation?: Conversation | null): Con
       type: "Opportunity",
       title: "Tighten Pigui's responses",
       detail: `Pigui is averaging ${avgPiguiWords} words per turn, which is high relative to the client's ${avgClientWords}.`,
+      score: Math.max(68, Math.min(93, 78 + Math.min(15, avgPiguiWords - avgClientWords))),
       confidence: "High confidence",
       evidence: longestPiguiRow ? `Pigui: "${clipEvidence(longestPiguiRow.message)}"` : undefined,
       recommendation: "Rewrite the agent prompt to use one short answer, one reason, and one next question per turn."
@@ -1482,6 +1650,7 @@ const buildConversationInsightReport = (conversation?: Conversation | null): Con
       type: "Opportunity",
       title: "Deep customer context",
       detail: "The client gave a long answer with enough context to extract richer personalization or product feedback.",
+      score: Math.min(92, 70 + Math.round(longestClientRow.message.length / 12)),
       confidence: "High confidence",
       evidence: `${longestClientRow.speaker}: "${clipEvidence(longestClientRow.message)}"`,
       recommendation: "Convert this response into structured tags: goal, blocker, product area and recommended next action."
@@ -1494,6 +1663,7 @@ const buildConversationInsightReport = (conversation?: Conversation | null): Con
       detail: actionSignals
         ? "The conversation is concise and already contains action language."
         : "The conversation is concise, but the next action could be more explicit.",
+      score: actionSignals ? Math.min(88, 68 + actionSignals * 4) : 63,
       confidence: "Medium confidence",
       evidence: actionSignals ? `${actionSignals} action cue${actionSignals === 1 ? "" : "s"} detected in Pigui turns.` : undefined,
       recommendation: actionSignals ? "Send the recommended next step to the client record." : "Add a closing step that names the next action and owner."
@@ -1506,6 +1676,7 @@ const buildConversationInsightReport = (conversation?: Conversation | null): Con
       type: "Opportunity",
       title: "Add more acknowledgement",
       detail: "Pigui did not use clear acknowledgement or empathy language in the detected turns.",
+      score: 58,
       confidence: "Medium confidence",
       recommendation: "Start one response with a brief acknowledgement before asking the next question."
     });
@@ -1817,16 +1988,93 @@ const agentMetrics = computed(() => [
   { title: "Conversations", value: formatNumber(apiSummary.value.sessions), detail: "Generated in this period" },
   { title: "Clients with activity", value: formatNumber(apiSummary.value.users), detail: "With agent interaction" }
 ]);
+const insightAiReport = computed(() => {
+  const totalConversations = Math.max(conversations.value.length, 1);
+  const frictionCount = conversations.value.filter((conversation) => conversation.friction === "Yes").length;
+  const frictionRate = frictionCount / totalConversations;
+  const topInsight = [...insights.value].sort((left, right) => right.score - left.score)[0];
+  const areaCounts = conversations.value.reduce<Record<string, number>>((acc, conversation) => {
+    acc[conversation.area] = (acc[conversation.area] || 0) + 1;
+    return acc;
+  }, {});
+  const topArea = Object.entries(areaCounts).sort((left, right) => right[1] - left[1])[0];
+  const averageInsightScore = insights.value.length
+    ? Math.round(insights.value.reduce((sum, insight) => sum + insight.score, 0) / insights.value.length)
+    : 0;
+  const recommendationAcceptance = apiSummary.value.recommendationEvents
+    ? apiSummary.value.acceptedRecommendations / apiSummary.value.recommendationEvents
+    : 0;
+  const scoreValue = Math.max(
+    35,
+    Math.min(
+      98,
+      Math.round(
+        averageInsightScore * 0.45 +
+          (100 - frictionRate * 100 * 0.5) * 0.35 +
+          recommendationAcceptance * 100 * 0.15 +
+          Math.min(10, (topArea?.[1] || 0) / totalConversations * 15)
+      )
+    )
+  );
+  const tone = scoreValue >= 82 ? "strong" : scoreValue >= 65 ? "watch" : "risk";
+  const typeCounts = insights.value.reduce<Record<string, number>>((acc, insight) => {
+    acc[insight.type] = (acc[insight.type] || 0) + 1;
+    return acc;
+  }, {});
+  const signalCoverage = Object.values(typeCounts).filter((count) => count > 0).length;
+  return {
+    summary: topInsight
+      ? `AI synthesis favors ${topInsight.area} as the strongest theme, with ${frictionCount} friction signals and ${formatNumber(apiSummary.value.acceptedRecommendations)} accepted recommendations shaping the current reading.`
+      : "AI synthesis will summarize concentration, friction and recommendation lift once conversations are loaded.",
+    score: {
+      value: scoreValue,
+      label: tone === "strong" ? "Strong signal" : tone === "watch" ? "Watchlist" : "Needs attention",
+      tone
+    },
+    signals: [
+      {
+        label: "Dominant area",
+        value: topArea?.[0] || "N/A",
+        detail: topArea ? `${topArea[1]} of ${totalConversations} conversations are concentrated here.` : "No conversations loaded yet."
+      },
+      {
+        label: "Signal mix",
+        value: `${signalCoverage} types`,
+        detail: "Findings, frictions and opportunities are all represented."
+      },
+      {
+        label: "Friction pressure",
+        value: `${Math.round(frictionRate * 100)}%`,
+        detail: "Portion of conversations carrying friction markers."
+      },
+      {
+        label: "Recommendation lift",
+        value: `${Math.round(recommendationAcceptance * 100)}%`,
+        detail: "Accepted recommendations out of total AI recommendation events."
+      }
+    ],
+    highlights: [...insights.value]
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 3)
+      .map((insight) => ({
+        title: insight.insight,
+        detail: `${insight.confidence} · ${insight.recommendation}`,
+        evidence: insight.evidence,
+        priority: insight.priority
+      })),
+    topInsight
+  };
+});
 const insightMetrics = computed(() => [
-  { title: "Insights detected", value: formatNumber(insights.value.length), detail: "Generated from loaded conversations" },
-  { title: "Frictions detected", value: formatNumber(conversations.value.filter((conversation) => conversation.friction === "Yes").length), detail: "Issues or confusion signals" },
-  { title: "Recommendation events", value: formatNumber(apiSummary.value.recommendationEvents), detail: "AI recommendation records" },
-  { title: "Clients impacted", value: formatNumber(apiSummary.value.users), detail: "Related to detected insights" }
+  { title: "AI score", value: `${insightAiReport.value.score.value}`, detail: insightAiReport.value.score.label },
+  { title: "Friction rate", value: `${Math.round((conversations.value.filter((conversation) => conversation.friction === "Yes").length / Math.max(conversations.value.length, 1)) * 100)}%`, detail: "Loaded conversation friction" },
+  { title: "Recommendation lift", value: `${Math.round((apiSummary.value.acceptedRecommendations / Math.max(apiSummary.value.recommendationEvents, 1)) * 100)}%`, detail: "Accepted vs generated" },
+  { title: "Signal coverage", value: formatNumber(insights.value.length), detail: "AI themes synthesized" }
 ]);
 const insightBlocks = computed(() => [
-  { title: "Key findings", items: insights.value.filter((insight) => insight.type === "Finding").map((insight) => insight.insight).slice(0, 3) },
-  { title: "Detected frictions", items: insights.value.filter((insight) => insight.type === "Friction").map((insight) => insight.insight).slice(0, 3) },
-  { title: "Opportunities", items: insights.value.filter((insight) => insight.type === "Opportunity").map((insight) => insight.insight).slice(0, 3) }
+  { title: "Executive brief", items: insightAiReport.value.topInsight ? [insightAiReport.value.summary] : ["No production signals loaded yet."] },
+  { title: "Highest impact", items: insightAiReport.value.highlights.map((item) => item.title).slice(0, 3) },
+  { title: "AI next steps", items: insightAiReport.value.highlights.map((item) => item.detail).slice(0, 3) }
 ].map((block) => ({ ...block, items: block.items.length ? block.items : ["No production signals loaded yet."] })));
 
 const filteredClients = computed(() => {
