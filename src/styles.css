@@ -1334,6 +1334,113 @@ th {
   max-width: 860px;
 }
 
+.transcript-insights-hero--conversation {
+  margin-bottom: 16px;
+}
+
+.insights-score--conversation {
+  min-width: 146px;
+}
+
+.insight-signal-grid--conversation {
+  margin-bottom: 16px;
+}
+
+.insight-signal-card--conversation {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border-color: #d7e4f2;
+}
+
+.transcript-insights__layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(250px, 0.85fr) minmax(0, 1.15fr);
+  margin-top: 6px;
+}
+
+.transcript-insights-summary {
+  align-content: start;
+  background: linear-gradient(180deg, #f9fbff 0%, #eef5ff 100%);
+  border: 1px solid #d8e4f3;
+  border-radius: 18px;
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+}
+
+.transcript-insights-summary__label {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.transcript-insights-summary strong {
+  color: #10203c;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.transcript-insights-summary p {
+  color: #51627b;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.transcript-insights-summary__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.transcript-insights-summary__meta span {
+  background: #ffffff;
+  border: 1px solid #dbe7f5;
+  border-radius: 999px;
+  color: #4f617c;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 10px;
+}
+
+.transcript-insights__list {
+  min-width: 0;
+}
+
+.transcript-insight-item__header {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.transcript-insight-item__score {
+  align-items: center;
+  background: #f8fbff;
+  border: 1px solid #dbe7f5;
+  border-radius: 14px;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  min-width: 74px;
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.transcript-insight-item__score span {
+  color: #5f718a;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.transcript-insight-item__score strong {
+  color: #10203c;
+  font-size: 22px;
+  line-height: 1;
+}
+
 .conversation-score {
   align-items: center;
   aspect-ratio: 1;
@@ -1643,6 +1750,10 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .transcript-insights__layout {
+    grid-template-columns: 1fr;
+  }
+
   .overview-grid--featured,
   .overview-grid--summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1704,9 +1815,17 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .transcript-insights-hero--conversation {
+    gap: 14px;
+  }
+
   .conversation-score {
     aspect-ratio: auto;
     min-width: 0;
+  }
+
+  .insights-score--conversation {
+    width: 100%;
   }
 
   .journey-grid__row {
@@ -1739,5 +1858,14 @@ th {
 
   .transcript-insights-modal__bar {
     padding-top: 18px;
+  }
+
+  .transcript-insight-item__header {
+    grid-template-columns: 1fr;
+  }
+
+  .transcript-insight-item__score {
+    justify-items: start;
+    width: fit-content;
   }
 }

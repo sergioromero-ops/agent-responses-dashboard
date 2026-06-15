@@ -589,43 +589,68 @@
           <button class="modal-close-button" type="button" aria-label="Close conversation insights" @click="closeTranscriptInsights">×</button>
         </div>
 
-        <div class="transcript-insights__header">
-          <div>
+        <section class="transcript-insights-hero transcript-insights-hero--conversation">
+          <div class="transcript-insights-hero__copy">
             <span class="ai-kicker">AI conversation brief</span>
             <h3 id="conversation-insights-title">Conversation insights</h3>
             <p>{{ selectedConversationInsightSummary }}</p>
+            <div class="insight-pill-row">
+              <span class="insight-pill">{{ selectedConversationInsightScore.label }}</span>
+              <span class="insight-pill">Transcript score {{ selectedConversationInsightScore.value }}/100</span>
+              <span class="insight-pill">{{ selectedConversationInsightSignals[0]?.value || "No dominant theme" }}</span>
+            </div>
           </div>
-          <div class="conversation-score" :class="`conversation-score--${selectedConversationInsightScore.tone}`">
+
+          <div class="insights-score insights-score--conversation" :class="`insights-score--${selectedConversationInsightScore.tone}`">
             <span>{{ selectedConversationInsightScore.label }}</span>
             <strong>{{ selectedConversationInsightScore.value }}</strong>
             <small>quality score</small>
           </div>
-        </div>
+        </section>
 
-        <div class="insight-signal-grid">
-          <article v-for="signal in selectedConversationInsightSignals" :key="signal.label" class="insight-signal-card">
+        <div class="insight-signal-grid insight-signal-grid--conversation">
+          <article v-for="signal in selectedConversationInsightSignals" :key="signal.label" class="insight-signal-card insight-signal-card--conversation">
             <span>{{ signal.label }}</span>
             <strong>{{ signal.value }}</strong>
             <p>{{ signal.detail }}</p>
           </article>
         </div>
 
-        <div class="transcript-insights__list">
-          <article v-for="insight in selectedConversationInsights" :key="insight.id" class="transcript-insight-item" :class="`transcript-insight-item--${insight.type.toLowerCase()}`">
-            <div class="transcript-insight-item__topline">
-              <span class="transcript-insight-item__type" :class="`transcript-insight-item__type--${insight.type.toLowerCase()}`">{{ insight.type }}</span>
-              <span class="transcript-insight-item__confidence">{{ insight.confidence }}</span>
-            </div>
-            <div>
-              <strong>{{ insight.title }}</strong>
-              <p>{{ insight.detail }}</p>
-            </div>
-            <blockquote v-if="insight.evidence">{{ insight.evidence }}</blockquote>
-            <div v-if="insight.recommendation" class="insight-recommendation">
-              <span>Next action</span>
-              <p>{{ insight.recommendation }}</p>
+        <div class="transcript-insights__layout">
+          <article class="transcript-insights-summary">
+            <span class="transcript-insights-summary__label">AI readout</span>
+            <strong>What the model sees</strong>
+            <p>{{ selectedConversationInsightSummary }}</p>
+            <div class="transcript-insights-summary__meta">
+              <span>Score {{ selectedConversationInsightScore.value }}/100</span>
+              <span>{{ selectedConversationInsightSignals.length }} signals</span>
+              <span>{{ selectedConversationInsights.length }} findings</span>
             </div>
           </article>
+
+          <div class="transcript-insights__list">
+            <article v-for="insight in selectedConversationInsights" :key="insight.id" class="transcript-insight-item" :class="`transcript-insight-item--${insight.type.toLowerCase()}`">
+              <div class="transcript-insight-item__topline">
+                <span class="transcript-insight-item__type" :class="`transcript-insight-item__type--${insight.type.toLowerCase()}`">{{ insight.type }}</span>
+                <span class="transcript-insight-item__confidence">{{ insight.confidence }}</span>
+              </div>
+              <div class="transcript-insight-item__header">
+                <div>
+                  <strong>{{ insight.title }}</strong>
+                  <p>{{ insight.detail }}</p>
+                </div>
+                <div class="transcript-insight-item__score">
+                  <span>AI score</span>
+                  <strong>{{ insight.score }}</strong>
+                </div>
+              </div>
+              <blockquote v-if="insight.evidence">{{ insight.evidence }}</blockquote>
+              <div v-if="insight.recommendation" class="insight-recommendation">
+                <span>Next action</span>
+                <p>{{ insight.recommendation }}</p>
+              </div>
+            </article>
+          </div>
         </div>
       </section>
     </div>
