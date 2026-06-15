@@ -1665,6 +1665,18 @@ const loadProductionData = async () => {
   }
 };
 
+const canonicalAgents = computed<Agent[]>(() =>
+  agentCatalog.slice(0, 9).map((agent) => {
+    const agentConversations = conversations.value.filter((conversation) => conversation.agent === agent.name);
+    return {
+      ...agent,
+      conversations: agentConversations.length,
+      clientsWithActivity: new Set(agentConversations.map((conversation) => conversation.clientId)).size,
+      lastActivity: agentConversations[0]?.date || agent.lastActivity || "No activity"
+    };
+  })
+);
+
 const selectedClient = computed(() => clients.value.find((client) => client.id === selectedClientId.value));
 const selectedConversation = computed(() => conversations.value.find((conversation) => conversation.id === selectedConversationId.value));
 const selectedConversationInsightReport = computed(() => buildConversationInsightReport(selectedConversation.value));
@@ -1673,7 +1685,7 @@ const selectedConversationInsightSummary = computed(() => selectedConversationIn
 const selectedConversationInsightScore = computed(() => selectedConversationInsightReport.value.score);
 const selectedConversationInsightSignals = computed(() => selectedConversationInsightReport.value.signals);
 const selectedClientConversations = computed(() => conversations.value.filter((conversation) => conversation.clientId === selectedClientId.value));
-const selectedAgent = computed(() => activeAgentCatalog.value.find((agent) => agent.id === selectedAgentId.value));
+const selectedAgent = computed(() => canonicalAgents.value.find((agent) => agent.id === selectedAgentId.value));
 const selectedAgentResponseCount = computed(() => selectedAgentResponses.value.length);
 const selectedAgentAcceptedCount = computed(() => selectedAgentResponses.value.filter((response) => response.accepted).length);
 const authAdminId = computed(() => adminUsers.value.find((admin) => admin.email === settings.value.adminEmail)?.id || adminUsers.value[0]?.id || "");
@@ -1781,15 +1793,7 @@ const summaryMetrics = computed(() => [
   }
 ]);
 const journeyFlowRows = computed(() => {
-  const journeyAgents = agentCatalog.slice(0, 9).map((agent) => {
-    const agentConversations = conversations.value.filter((conversation) => conversation.agent === agent.name);
-    return {
-      ...agent,
-      conversations: agentConversations.length,
-      clientsWithActivity: new Set(agentConversations.map((conversation) => conversation.clientId)).size,
-      lastActivity: agentConversations[0]?.date || agent.lastActivity || "No activity"
-    };
-  });
+  const journeyAgents = canonicalAgents.value;
   return Array.from({ length: 3 }, (_unused, rowIndex) => ({
     index: rowIndex + 1,
     items: journeyAgents.slice(rowIndex * 3, rowIndex * 3 + 3)
@@ -1808,8 +1812,8 @@ const conversationMetrics = computed(() => [
   { title: "Conversations with friction", value: formatNumber(conversations.value.filter((conversation) => conversation.friction === "Yes").length), detail: "With detected friction signals" }
 ]);
 const agentMetrics = computed(() => [
-  { title: "Total agents", value: formatNumber(activeAgentCatalog.value.length), detail: "Available across the ecosystem" },
-  { title: "Active agents", value: formatNumber(agents.value.filter((agent) => agent.conversations > 0).length), detail: "With loaded activity" },
+  { title: "Total agents", value: formatNumber(canonicalAgents.value.length), detail: "Available in the canonical journey" },
+  { title: "Active agents", value: formatNumber(canonicalAgents.value.filter((agent) => agent.conversations > 0).length), detail: "With loaded activity" },
   { title: "Conversations", value: formatNumber(apiSummary.value.sessions), detail: "Generated in this period" },
   { title: "Clients with activity", value: formatNumber(apiSummary.value.users), detail: "With agent interaction" }
 ]);
@@ -1843,7 +1847,7 @@ const filteredConversations = computed(() => {
 });
 const filteredAgents = computed(() => {
   const term = agentSearch.value.toLowerCase().trim();
-  return agents.value.filter((agent) => {
+  return canonicalAgents.value.filter((agent) => {
     const matchesTerm = !term || `${agent.name} ${agent.area} ${agent.type} ${(agent.repoMatches || []).join(" ")}`.toLowerCase().includes(term);
     const matchesArea = agentFilters.value.area === "All areas" || agent.area === agentFilters.value.area;
     const matchesStatus = agentFilters.value.status === "All statuses" || agent.status === agentFilters.value.status;
