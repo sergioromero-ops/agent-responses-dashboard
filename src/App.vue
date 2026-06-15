@@ -319,53 +319,13 @@
                 class="secondary-action"
                 :class="{ 'secondary-action--active': showTranscriptInsights }"
                 type="button"
-                @click="toggleTranscriptInsights"
+                @click="openTranscriptInsights"
               >
                 Insights
               </button>
               <button class="primary-action" type="button" @click="downloadTranscript(selectedConversation.id)">Download transcript</button>
             </div>
           </div>
-          <section v-if="showTranscriptInsights" class="transcript-insights">
-            <div class="transcript-insights__header">
-              <div>
-                <span class="ai-kicker">AI conversation brief</span>
-                <h3>Conversation insights</h3>
-                <p>{{ selectedConversationInsightSummary }}</p>
-              </div>
-              <div class="conversation-score" :class="`conversation-score--${selectedConversationInsightScore.tone}`">
-                <span>{{ selectedConversationInsightScore.label }}</span>
-                <strong>{{ selectedConversationInsightScore.value }}</strong>
-                <small>quality score</small>
-              </div>
-            </div>
-
-            <div class="insight-signal-grid">
-              <article v-for="signal in selectedConversationInsightSignals" :key="signal.label" class="insight-signal-card">
-                <span>{{ signal.label }}</span>
-                <strong>{{ signal.value }}</strong>
-                <p>{{ signal.detail }}</p>
-              </article>
-            </div>
-
-            <div class="transcript-insights__list">
-              <article v-for="insight in selectedConversationInsights" :key="insight.id" class="transcript-insight-item" :class="`transcript-insight-item--${insight.type.toLowerCase()}`">
-                <div class="transcript-insight-item__topline">
-                  <span class="transcript-insight-item__type" :class="`transcript-insight-item__type--${insight.type.toLowerCase()}`">{{ insight.type }}</span>
-                  <span class="transcript-insight-item__confidence">{{ insight.confidence }}</span>
-                </div>
-                <div>
-                  <strong>{{ insight.title }}</strong>
-                  <p>{{ insight.detail }}</p>
-                </div>
-                <blockquote v-if="insight.evidence">{{ insight.evidence }}</blockquote>
-                <div v-if="insight.recommendation" class="insight-recommendation">
-                  <span>Next action</span>
-                  <p>{{ insight.recommendation }}</p>
-                </div>
-              </article>
-            </div>
-          </section>
           <div class="transcript-list">
             <article v-for="row in selectedConversation.transcript" :key="row.timestamp + row.message" class="transcript-row" :class="row.speaker === 'Pigui' ? 'transcript-row--pigui' : 'transcript-row--client'">
               <time>{{ row.timestamp }}</time>
@@ -576,13 +536,73 @@
       </section>
     </section>
   </main>
+
+  <Teleport to="body">
+    <div
+      v-if="showTranscriptInsights && selectedConversation"
+      class="transcript-insights-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="conversation-insights-title"
+      @click.self="closeTranscriptInsights"
+    >
+      <section class="transcript-insights transcript-insights--modal">
+        <div class="transcript-insights-modal__bar">
+          <div>
+            <span>Conversation insights</span>
+            <strong>{{ selectedConversation.client }} / {{ selectedConversation.agent }}</strong>
+          </div>
+          <button class="modal-close-button" type="button" aria-label="Close conversation insights" @click="closeTranscriptInsights">×</button>
+        </div>
+
+        <div class="transcript-insights__header">
+          <div>
+            <span class="ai-kicker">AI conversation brief</span>
+            <h3 id="conversation-insights-title">Conversation insights</h3>
+            <p>{{ selectedConversationInsightSummary }}</p>
+          </div>
+          <div class="conversation-score" :class="`conversation-score--${selectedConversationInsightScore.tone}`">
+            <span>{{ selectedConversationInsightScore.label }}</span>
+            <strong>{{ selectedConversationInsightScore.value }}</strong>
+            <small>quality score</small>
+          </div>
+        </div>
+
+        <div class="insight-signal-grid">
+          <article v-for="signal in selectedConversationInsightSignals" :key="signal.label" class="insight-signal-card">
+            <span>{{ signal.label }}</span>
+            <strong>{{ signal.value }}</strong>
+            <p>{{ signal.detail }}</p>
+          </article>
+        </div>
+
+        <div class="transcript-insights__list">
+          <article v-for="insight in selectedConversationInsights" :key="insight.id" class="transcript-insight-item" :class="`transcript-insight-item--${insight.type.toLowerCase()}`">
+            <div class="transcript-insight-item__topline">
+              <span class="transcript-insight-item__type" :class="`transcript-insight-item__type--${insight.type.toLowerCase()}`">{{ insight.type }}</span>
+              <span class="transcript-insight-item__confidence">{{ insight.confidence }}</span>
+            </div>
+            <div>
+              <strong>{{ insight.title }}</strong>
+              <p>{{ insight.detail }}</p>
+            </div>
+            <blockquote v-if="insight.evidence">{{ insight.evidence }}</blockquote>
+            <div v-if="insight.recommendation" class="insight-recommendation">
+              <span>Next action</span>
+              <p>{{ insight.recommendation }}</p>
+            </div>
+          </article>
+        </div>
+      </section>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import "apexcharts/violin";
 import ApexChart from "vue3-apexcharts";
 import type { ApexOptions } from "apexcharts";
-import { computed, defineComponent, h, onMounted, ref, watch } from "vue";
+import { computed, defineComponent, h, onMounted, onUnmounted, ref, watch } from "vue";
 
 type NavId = "dashboard" | "clients" | "conversations" | "agents" | "insights" | "settings";
 type Route = NavId | "client-detail" | "client-conversations" | "transcript";
@@ -1878,8 +1898,14 @@ const downloadTranscript = (conversationId: string) => {
   link.click();
   URL.revokeObjectURL(url);
 };
-const toggleTranscriptInsights = () => {
-  showTranscriptInsights.value = !showTranscriptInsights.value;
+const openTranscriptInsights = () => {
+  showTranscriptInsights.value = true;
+};
+const closeTranscriptInsights = () => {
+  showTranscriptInsights.value = false;
+};
+const handleTranscriptInsightsKeydown = (event: KeyboardEvent) => {
+  if (event.key === "Escape") closeTranscriptInsights();
 };
 const areaClass = (area: Area) => `area-chip--${area.toLowerCase()}`;
 const statusClass = (status: Status) => {
@@ -2035,6 +2061,21 @@ onMounted(() => {
   syncRouteFromPath();
   if (!window.location.pathname.startsWith("/sign-in")) void loadProductionData();
   window.addEventListener("popstate", syncRouteFromPath);
+  window.addEventListener("keydown", handleTranscriptInsightsKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("popstate", syncRouteFromPath);
+  window.removeEventListener("keydown", handleTranscriptInsightsKeydown);
+  document.body.style.overflow = "";
+});
+
+watch(showTranscriptInsights, (isOpen) => {
+  document.body.style.overflow = isOpen ? "hidden" : "";
+});
+
+watch(route, (nextRoute) => {
+  if (nextRoute !== "transcript") closeTranscriptInsights();
 });
 
 watch(selectedRange, () => {
