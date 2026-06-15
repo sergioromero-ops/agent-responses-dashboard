@@ -268,10 +268,35 @@
           <article class="stat-card"><span>Duration</span><strong>{{ selectedConversation.duration }}</strong><p>Total duration</p></article>
         </div>
         <section class="panel">
-          <div class="table-toolbar">
-            <h2>Full transcript</h2>
-            <button class="primary-action" type="button" @click="downloadTranscript(selectedConversation.id)">Download transcript</button>
+          <div class="transcript-toolbar">
+            <div>
+              <h2>Full transcript</h2>
+              <p>Use the actions to download the transcript or inspect this conversation on its own.</p>
+            </div>
+            <div class="transcript-actions">
+              <button
+                class="secondary-action"
+                :class="{ 'secondary-action--active': showTranscriptInsights }"
+                type="button"
+                @click="toggleTranscriptInsights"
+              >
+                Insights
+              </button>
+              <button class="primary-action" type="button" @click="downloadTranscript(selectedConversation.id)">Download transcript</button>
+            </div>
           </div>
+          <section v-if="showTranscriptInsights" class="transcript-insights">
+            <h3>Conversation insights</h3>
+            <ul class="transcript-insights__list">
+              <li v-for="insight in selectedConversationInsights" :key="insight.id" class="transcript-insight-item">
+                <span class="transcript-insight-item__type" :class="`transcript-insight-item__type--${insight.type.toLowerCase()}`">{{ insight.type }}</span>
+                <div>
+                  <strong>{{ insight.title }}</strong>
+                  <p>{{ insight.detail }}</p>
+                </div>
+              </li>
+            </ul>
+          </section>
           <div class="transcript-list">
             <article v-for="row in selectedConversation.transcript" :key="row.timestamp + row.message" class="transcript-row" :class="row.speaker === 'Pigui' ? 'transcript-row--pigui' : 'transcript-row--client'">
               <time>{{ row.timestamp }}</time>
@@ -584,6 +609,12 @@ type Conversation = {
   friction: "Yes" | "No";
   transcript: TranscriptRow[];
 };
+type ConversationInsight = {
+  id: string;
+  type: "Finding" | "Friction" | "Opportunity";
+  title: string;
+  detail: string;
+};
 type AdminUser = {
   id: string;
   name: string;
@@ -664,6 +695,7 @@ const selectedRange = ref("Last 90 days");
 const selectedClientId = ref("");
 const selectedConversationId = ref("");
 const transcriptContext = ref<"clients" | "conversations">("conversations");
+const showTranscriptInsights = ref(false);
 const clientSearch = ref("");
 const conversationSearch = ref("");
 const agentSearch = ref("");
@@ -1124,6 +1156,113 @@ const buildInsights = () => {
     }
   ];
 };
+
+const normalizeTranscriptText = (value: string) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\u00c0-\u017f\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const buildConversationInsights = (conversation?: Conversation | null): ConversationInsight[] => {
+  if (!conversation) return [];
+
+  const transcript = conversation.transcript || [];
+  if (!transcript.length) {
+    return [
+      {
+        id: `${conversation.id}-empty`,
+        type: "Finding",
+        title: "No transcript content",
+        detail: "This conversation has no transcript rows loaded yet."
+      }
+    ];
+  }
+
+  const piguiTurns = transcript.filter((row) => row.speaker === "Pigui").length;
+  const clientTurns = transcript.length - piguiTurns;
+  const clientMessages = transcript.filter((row) => row.speaker !== "Pigui").map((row) => row.message);
+  const piguiMessages = transcript.filter((row) => row.speaker === "Pigui").map((row) => row.message);
+  const allText = normalizeTranscriptText(transcript.map((row) => row.message).join(" "));
+
+  const themeRules = [
+    { keywords: ["price", "cost", "money", "payment", "fee", "discount"], label: "pricing" },
+    { keywords: ["problem", "issue", "error", "bug", "fail", "not working", "doesn't", "doesnt"], label: "friction" },
+    { keywords: ["help", "how", "explain", "clarify", "understand"], label: "clarity" },
+    { keywords: ["buy", "purchase", "order", "redeem", "claim"], label: "conversion" },
+    { keywords: ["business", "company", "branch", "store", "customer"], label: "business context" }
+  ];
+
+  const topTheme = themeRules
+    .map((rule) => ({
+      label: rule.label,
+      score: rule.keywords.reduce((sum, keyword) => sum + (allText.includes(keyword) ? 1 : 0), 0)
+    }))
+    .sort((left, right) => right.score - left.score)[0];
+  const longestClientMessage = [...clientMessages].sort((left, right) => right.length - left.length)[0] || "";
+  const clientQuestionCount = clientMessages.filter((message) => message.includes("?")).length;
+  const frictionSignals = transcript.filter((row) =>
+    /problem|issue|error|bug|confus|stuck|doesn'?t|no entiendo|not clear|frustrat/i.test(row.message)
+  ).length;
+
+  const insights: ConversationInsight[] = [
+    {
+      id: `${conversation.id}-balance`,
+      type: "Finding",
+      title: "Conversation balance",
+      detail: `This transcript contains ${clientTurns} client turns and ${piguiTurns} Pigui turns.`
+    },
+    {
+      id: `${conversation.id}-theme`,
+      type: "Finding",
+      title: "Main theme",
+      detail: topTheme?.score ? `The strongest signal is around ${topTheme.label}.` : "No dominant theme was detected from the transcript text."
+    }
+  ];
+
+  if (clientQuestionCount > 0 || frictionSignals > 0) {
+    insights.push({
+      id: `${conversation.id}-friction`,
+      type: "Friction",
+      title: "Potential friction",
+      detail: frictionSignals > 0
+        ? `The transcript includes ${frictionSignals} signal${frictionSignals === 1 ? "" : "s"} of confusion or friction.`
+        : `The client asked ${clientQuestionCount} direct question${clientQuestionCount === 1 ? "" : "s"}, which may need a clearer handoff or explanation.`
+    });
+  } else {
+    insights.push({
+      id: `${conversation.id}-friction`,
+      type: "Opportunity",
+      title: "Low-friction flow",
+      detail: "No obvious friction keywords were detected in this conversation."
+    });
+  }
+
+  if (longestClientMessage.length >= 120) {
+    insights.push({
+      id: `${conversation.id}-depth`,
+      type: "Opportunity",
+      title: "Deep customer context",
+      detail: `The longest client response is ${longestClientMessage.length} characters, which suggests enough detail to extract richer follow-up actions.`
+    });
+  } else if (piguiMessages.some((message) => message.length > 140)) {
+    insights.push({
+      id: `${conversation.id}-depth`,
+      type: "Opportunity",
+      title: "High agent verbosity",
+      detail: "Some Pigui responses are long, so there may be room to tighten the flow and shorten the path to the next question."
+    });
+  } else {
+    insights.push({
+      id: `${conversation.id}-depth`,
+      type: "Opportunity",
+      title: "Move to action",
+      detail: "This conversation appears concise enough to turn into a next-step recommendation or follow-up."
+    });
+  }
+
+  return insights;
+};
 const loadAdminUsers = async () => {
   if (USE_DEMO_DATA && !authToken.value) {
     adminUsers.value = [{
@@ -1271,6 +1410,7 @@ const loadProductionData = async () => {
 
 const selectedClient = computed(() => clients.value.find((client) => client.id === selectedClientId.value));
 const selectedConversation = computed(() => conversations.value.find((conversation) => conversation.id === selectedConversationId.value));
+const selectedConversationInsights = computed(() => buildConversationInsights(selectedConversation.value));
 const selectedClientConversations = computed(() => conversations.value.filter((conversation) => conversation.clientId === selectedClientId.value));
 const selectedAgent = computed(() => activeAgentCatalog.value.find((agent) => agent.id === selectedAgentId.value));
 const selectedAgentResponseCount = computed(() => selectedAgentResponses.value.length);
@@ -1395,6 +1535,7 @@ const openAgent = (agentId: string) => {
 const openTranscript = (conversationId: string) => {
   selectedConversationId.value = conversationId;
   transcriptContext.value = activeNav.value === "clients" ? "clients" : "conversations";
+  showTranscriptInsights.value = false;
   if (transcriptContext.value === "clients") {
     selectedClientId.value = conversations.value.find((conversation) => conversation.id === conversationId)?.clientId || selectedClientId.value;
   }
@@ -1412,6 +1553,9 @@ const downloadTranscript = (conversationId: string) => {
   link.download = `${conversation.client}-${conversation.agent}-transcript.txt`.replace(/[^a-z0-9.-]+/gi, "-").toLowerCase();
   link.click();
   URL.revokeObjectURL(url);
+};
+const toggleTranscriptInsights = () => {
+  showTranscriptInsights.value = !showTranscriptInsights.value;
 };
 const areaClass = (area: Area) => `area-chip--${area.toLowerCase()}`;
 const statusClass = (status: Status) => {
@@ -1534,6 +1678,7 @@ const syncRouteFromPath = () => {
     transcriptContext.value = "clients";
     route.value = "transcript";
     activeNav.value = "clients";
+    showTranscriptInsights.value = false;
     return;
   }
   if (parts[0] === "clients" && parts[1] && parts[2] === "conversations") {
@@ -1553,6 +1698,7 @@ const syncRouteFromPath = () => {
     transcriptContext.value = "conversations";
     route.value = "transcript";
     activeNav.value = "conversations";
+    showTranscriptInsights.value = false;
     return;
   }
   if (["dashboard", "clients", "conversations", "agents", "insights", "settings"].includes(parts[0])) {

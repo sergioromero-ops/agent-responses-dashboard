@@ -21,6 +21,7 @@ const pool = process.env.DATABASE_URL
 app.use(express.json());
 
 const authSecret = process.env.DASHBOARD_AUTH_SECRET || process.env.DATABASE_URL || "local-dashboard-secret";
+const JOURNEY_COMPLETION_STEPS = 9;
 
 const base64url = (value) => Buffer.from(value).toString("base64url");
 const signPayload = (payload) =>
@@ -507,6 +508,14 @@ app.get("/api/summary", async (req, res, next) => {
             where is_active = true
               and created_at >= now() - ($1::int * interval '1 day')
           ),
+          session_rows as (
+            select
+              user_id,
+              jsonb_array_length(coalesce(answers, '[]'::jsonb))::int as answers_count
+            from business.onboarding_voice_sessions
+            where is_active = true
+              and created_at >= now() - ($1::int * interval '1 day')
+          ),
           user_flags as (
             select
               au.user_id,
@@ -539,16 +548,23 @@ app.get("/api/summary", async (req, res, next) => {
               ) as has_mobile
             from active_users au
           ),
-          session_metrics as (
+          user_session_metrics as (
             select
-              count(distinct user_id)::int as users,
+              sr.user_id,
               count(*)::int as sessions,
-              count(*) filter (where status = 'completed')::int as completed_sessions,
-              coalesce(sum(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::int as answers,
-              coalesce(avg(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::float as avg_answers_per_session
-            from business.onboarding_voice_sessions
-            where is_active = true
-              and created_at >= now() - ($1::int * interval '1 day')
+              coalesce(sum(sr.answers_count), 0)::int as answers,
+              case when count(*) >= $2::int then 1 else 0 end as completed_sessions
+            from session_rows sr
+            group by sr.user_id
+          ),
+          summary_metrics as (
+            select
+              count(*)::int as users,
+              coalesce(sum(usm.sessions), 0)::int as sessions,
+              coalesce(sum(usm.completed_sessions), 0)::int as completed_sessions,
+              coalesce(sum(usm.answers), 0)::int as answers,
+              coalesce(sum(usm.answers)::float / nullif(sum(usm.sessions), 0), 0)::float as avg_answers_per_session
+            from user_session_metrics usm
           )
           select
             sm.*,
@@ -557,9 +573,9 @@ app.get("/api/summary", async (req, res, next) => {
             (select count(*)::int from user_flags where has_b2b) as b2b_users,
             (select count(*)::int from user_flags where has_b2c) as b2c_users,
             (select count(*)::int from user_flags where has_b2o) as b2o_users
-          from session_metrics sm
+          from summary_metrics sm
         `,
-        [days]
+        [days, JOURNEY_COMPLETION_STEPS]
       );
       Object.assign(summary, {
         users: result.rows[0].users,
@@ -615,10 +631,10 @@ app.get("/api/users", async (req, res, next) => {
             user_id,
             count(*)::int as sessions,
             count(distinct branch_id)::int as branches,
-            count(*) filter (where status = 'completed')::int as completed_sessions,
             coalesce(sum(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::int as answers,
             coalesce(avg(jsonb_array_length(coalesce(answers, '[]'::jsonb))), 0)::float as avg_answers_per_session,
-            max(updated_at) as last_activity_at
+            max(updated_at) as last_activity_at,
+            case when count(*) >= $2::int then 1 else 0 end as completed_sessions
           from business.onboarding_voice_sessions
           where is_active = true
             and created_at >= now() - ($1::int * interval '1 day')
@@ -719,7 +735,7 @@ app.get("/api/users", async (req, res, next) => {
         order by last_activity_at desc
         limit 100
       `,
-      [days, search]
+      [days, JOURNEY_COMPLETION_STEPS, search]
     );
 
     res.json(result.rows.map((row) => ({

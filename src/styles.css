@@ -150,6 +150,11 @@ select:focus {
   color: #17325c;
 }
 
+.secondary-action--active {
+  background: #dbeafe;
+  box-shadow: inset 0 0 0 1px #93c5fd;
+}
+
 .link-action {
   background: transparent;
   color: #1f6fff;
@@ -810,6 +815,100 @@ th {
   gap: 10px;
 }
 
+.transcript-toolbar {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.transcript-toolbar p {
+  color: #66758d;
+  line-height: 1.45;
+  margin-top: 6px;
+  max-width: 70ch;
+}
+
+.transcript-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.transcript-insights {
+  background: #f7fbff;
+  border: 1px solid #dbe7f5;
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.transcript-insights h3 {
+  color: #0f1e3a;
+  font-size: 16px;
+  margin: 0;
+}
+
+.transcript-insights__list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.transcript-insight-item {
+  align-items: flex-start;
+  background: #ffffff;
+  border: 1px solid #e2eaf5;
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 12px 14px;
+}
+
+.transcript-insight-item strong {
+  color: #14213d;
+  display: block;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.transcript-insight-item p {
+  color: #52627c;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.transcript-insight-item__type {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 5px 10px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.transcript-insight-item__type--finding {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.transcript-insight-item__type--friction {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.transcript-insight-item__type--opportunity {
+  background: #dcfce7;
+  color: #166534;
+}
+
 .transcript-row {
   border: 1px solid #e2eaf5;
   border-radius: 10px;
@@ -956,5 +1055,11 @@ th {
   .two-column,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .transcript-toolbar,
+  .transcript-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
