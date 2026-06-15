@@ -72,14 +72,49 @@
       <div v-else-if="isLoadingData" class="data-alert data-alert--loading">Loading production data...</div>
 
       <section v-if="route === 'dashboard'" class="page-stack">
-        <section class="panel">
-          <div class="section-heading">
-            <h2>Overview Metrics</h2>
+        <section class="panel panel--dashboard">
+          <div class="section-heading section-heading--dashboard">
+            <h2>Overview metrics</h2>
           </div>
-          <div class="overview-grid">
-            <article v-for="metric in overviewMetrics" :key="metric.title" class="metric-card" :class="metric.color ? `metric-card--${metric.color}` : ''">
+          <div class="overview-grid overview-grid--featured">
+            <article
+              v-for="metric in featuredMetrics"
+              :key="metric.title"
+              class="metric-card metric-card--featured"
+              :class="metric.color ? `metric-card--${metric.color}` : ''"
+            >
+              <div class="metric-card__top">
+                <span class="metric-card__icon" :class="`metric-card__icon--${metric.color}`" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path :d="metric.iconPath" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </span>
+                <span class="metric-card__badge" v-if="metric.badge">{{ metric.badge }}</span>
+              </div>
               <span class="metric-card__label">{{ metric.title }}</span>
               <strong>{{ metric.value }}</strong>
+              <p>{{ metric.detail }}</p>
+            </article>
+          </div>
+          <div class="overview-grid overview-grid--summary">
+            <article
+              v-for="metric in summaryMetrics"
+              :key="metric.title"
+              class="metric-card metric-card--summary"
+              :class="metric.color ? `metric-card--${metric.color}` : ''"
+            >
+              <div class="metric-card__top">
+                <span class="metric-card__icon" :class="`metric-card__icon--${metric.color}`" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path :d="metric.iconPath" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </span>
+              </div>
+              <span class="metric-card__label">{{ metric.title }}</span>
+              <strong>
+                <span class="metric-card__value">{{ metric.value }}</span>
+                <small>{{ metric.unit }}</small>
+              </strong>
               <p>{{ metric.detail }}</p>
             </article>
           </div>
@@ -119,20 +154,26 @@
           </div>
         </section>
 
-        <section class="panel">
-          <div class="section-heading">
-            <h2>Customer Journey Flow</h2>
+        <section class="panel panel--dashboard">
+          <div class="section-heading section-heading--dashboard">
+            <h2>Customer journey flow</h2>
           </div>
-          <div class="journey-grid">
-            <article v-for="agent in agents" :key="agent.id" class="journey-step">
-              <span class="journey-step__number">{{ agent.step }}</span>
-              <div>
-                <h3>{{ agent.name }}</h3>
-                <span class="area-chip" :class="areaClass(agent.area)">{{ agent.area }}</span>
-                <strong>{{ agent.conversations.toLocaleString() }} conversations</strong>
-                <p>{{ agent.purpose }}</p>
-              </div>
-            </article>
+          <div class="journey-grid journey-grid--dashboard">
+            <div v-for="row in journeyFlowRows" :key="row.index" class="journey-grid__row">
+              <template v-for="(agent, agentIndex) in row.items" :key="agent.id">
+                <article class="journey-step journey-step--dashboard">
+                  <span class="journey-step__number">{{ agent.step }}</span>
+                  <div class="journey-step__content">
+                    <div class="journey-step__header">
+                      <h3>{{ agent.name }}</h3>
+                      <span class="area-chip" :class="areaClass(agent.area)">{{ agent.area }}</span>
+                    </div>
+                    <strong>{{ agent.conversations.toLocaleString() }} conversations</strong>
+                  </div>
+                </article>
+                <span v-if="agentIndex < row.items.length - 1" class="journey-grid__arrow" aria-hidden="true">→</span>
+              </template>
+            </div>
           </div>
         </section>
       </section>
@@ -1441,16 +1482,91 @@ const agents = computed<Agent[]>(() =>
     };
   })
 );
-const overviewMetrics = computed(() => [
-  { title: "Website", value: formatNumber(apiSummary.value.webUsers), detail: "users · Web activity", color: "web" },
-  { title: "Pigui Business", value: formatNumber(apiSummary.value.b2bUsers), detail: "users · B2B segment", color: "b2b" },
-  { title: "Pigui Scan", value: formatNumber(apiSummary.value.b2oUsers), detail: "users · B2O segment", color: "b2o" },
-  { title: "Pigui Rewards", value: formatNumber(apiSummary.value.b2cUsers), detail: "users · B2C segment", color: "b2c" },
-  { title: "Clients", value: formatNumber(apiSummary.value.users), detail: "active in selected period" },
-  { title: "Pigui Agents", value: formatNumber(activeAgentCatalog.value.length), detail: "active · Across the ecosystem" },
-  { title: "Conversations", value: formatNumber(apiSummary.value.sessions), detail: "sessions · Generated in this period" },
-  { title: "Completed Sessions", value: formatNumber(apiSummary.value.completedSessions), detail: "completed · Across the ecosystem" }
+const agentAreaCounts = computed<Record<Area, number>>(() =>
+  activeAgentCatalog.value.reduce(
+    (acc, agent) => {
+      acc[agent.area] += 1;
+      return acc;
+    },
+    { Web: 0, B2B: 0, B2C: 0, B2O: 0 }
+  )
+);
+const agentCountLabel = (count: number) => `${count} agent${count === 1 ? "" : "s"}`;
+const featuredMetrics = computed(() => [
+  {
+    title: "Website",
+    value: formatNumber(apiSummary.value.webUsers),
+    detail: "conversations",
+    color: "web",
+    badge: agentCountLabel(agentAreaCounts.value.Web),
+    iconPath: "M12 3a9 9 0 1 0 9 9a9 9 0 0 0-9-9Zm0 0c-2.5 2.6-3.8 5.8-3.8 9s1.3 6.4 3.8 9m0-18c2.5 2.6 3.8 5.8 3.8 9s-1.3 6.4-3.8 9M3 12h18"
+  },
+  {
+    title: "Pigui Business",
+    value: formatNumber(apiSummary.value.b2bUsers),
+    detail: "conversations",
+    color: "b2b",
+    badge: agentCountLabel(agentAreaCounts.value.B2B),
+    iconPath: "M4 8.5A2.5 2.5 0 0 1 6.5 6h11A2.5 2.5 0 0 1 20 8.5V17H4V8.5Zm2-2.5V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1h-12Zm1 7h10"
+  },
+  {
+    title: "Pigui Scan",
+    value: formatNumber(apiSummary.value.b2oUsers),
+    detail: "conversations",
+    color: "b2o",
+    badge: agentCountLabel(agentAreaCounts.value.B2O),
+    iconPath: "M5 7h14v10H5z M8 7V5a4 4 0 0 1 8 0v2 M8 17l-1 2m9-2l1 2"
+  },
+  {
+    title: "Pigui Rewards",
+    value: formatNumber(apiSummary.value.b2cUsers),
+    detail: "conversations",
+    color: "b2c",
+    badge: agentCountLabel(agentAreaCounts.value.B2C),
+    iconPath: "M12 4l2.1 4.3L19 9l-3.5 3.4.8 4.8L12 15.7 7.7 17.2l.8-4.8L5 9l4.9-.7L12 4z"
+  }
 ]);
+const summaryMetrics = computed(() => [
+  {
+    title: "Clients",
+    value: formatNumber(apiSummary.value.users),
+    unit: "registered",
+    detail: "Users active in selected period",
+    color: "web",
+    iconPath: "M12 12a4 4 0 1 0-4-4a4 4 0 0 0 4 4Zm-7 8a7 7 0 0 1 14 0"
+  },
+  {
+    title: "Pigui Agents",
+    value: formatNumber(activeAgentCatalog.value.length),
+    unit: "active",
+    detail: "Across the ecosystem",
+    color: "b2b",
+    iconPath: "M7 7h10v10H7z M4 11V6a2 2 0 0 1 2-2h2m10 7V6a2 2 0 0 0-2-2h-2"
+  },
+  {
+    title: "Conversations",
+    value: formatNumber(apiSummary.value.sessions),
+    unit: "transcripts",
+    detail: "Generated in this period",
+    color: "b2o",
+    iconPath: "M4 5h16v11H8l-4 4V5z"
+  },
+  {
+    title: "Completed journey",
+    value: formatNumber(apiSummary.value.completedSessions),
+    unit: "successful",
+    detail: "Across the ecosystem",
+    color: "b2c",
+    iconPath: "M12 2l3 3h3l2 2v3l3 3-3 3v3l-2 2h-3l-3 3-3-3H6l-2-2v-3l-3-3 3-3V7l2-2h3z"
+  }
+]);
+const journeyFlowRows = computed(() => {
+  const journeyAgents = agents.value.slice(0, 9);
+  return Array.from({ length: 3 }, (_unused, rowIndex) => ({
+    index: rowIndex + 1,
+    items: journeyAgents.slice(rowIndex * 3, rowIndex * 3 + 3)
+  }));
+});
 const clientMetrics = computed(() => [
   { title: "Clients", value: formatNumber(apiSummary.value.users), detail: "Active users in selected period" },
   { title: "Active clients", value: formatNumber(clients.value.length), detail: "Loaded from production database" },
