@@ -327,16 +327,44 @@
             </div>
           </div>
           <section v-if="showTranscriptInsights" class="transcript-insights">
-            <h3>Conversation insights</h3>
-            <ul class="transcript-insights__list">
-              <li v-for="insight in selectedConversationInsights" :key="insight.id" class="transcript-insight-item">
-                <span class="transcript-insight-item__type" :class="`transcript-insight-item__type--${insight.type.toLowerCase()}`">{{ insight.type }}</span>
+            <div class="transcript-insights__header">
+              <div>
+                <span class="ai-kicker">AI conversation brief</span>
+                <h3>Conversation insights</h3>
+                <p>{{ selectedConversationInsightSummary }}</p>
+              </div>
+              <div class="conversation-score" :class="`conversation-score--${selectedConversationInsightScore.tone}`">
+                <span>{{ selectedConversationInsightScore.label }}</span>
+                <strong>{{ selectedConversationInsightScore.value }}</strong>
+                <small>quality score</small>
+              </div>
+            </div>
+
+            <div class="insight-signal-grid">
+              <article v-for="signal in selectedConversationInsightSignals" :key="signal.label" class="insight-signal-card">
+                <span>{{ signal.label }}</span>
+                <strong>{{ signal.value }}</strong>
+                <p>{{ signal.detail }}</p>
+              </article>
+            </div>
+
+            <div class="transcript-insights__list">
+              <article v-for="insight in selectedConversationInsights" :key="insight.id" class="transcript-insight-item" :class="`transcript-insight-item--${insight.type.toLowerCase()}`">
+                <div class="transcript-insight-item__topline">
+                  <span class="transcript-insight-item__type" :class="`transcript-insight-item__type--${insight.type.toLowerCase()}`">{{ insight.type }}</span>
+                  <span class="transcript-insight-item__confidence">{{ insight.confidence }}</span>
+                </div>
                 <div>
                   <strong>{{ insight.title }}</strong>
                   <p>{{ insight.detail }}</p>
                 </div>
-              </li>
-            </ul>
+                <blockquote v-if="insight.evidence">{{ insight.evidence }}</blockquote>
+                <div v-if="insight.recommendation" class="insight-recommendation">
+                  <span>Next action</span>
+                  <p>{{ insight.recommendation }}</p>
+                </div>
+              </article>
+            </div>
           </section>
           <div class="transcript-list">
             <article v-for="row in selectedConversation.transcript" :key="row.timestamp + row.message" class="transcript-row" :class="row.speaker === 'Pigui' ? 'transcript-row--pigui' : 'transcript-row--client'">
@@ -655,6 +683,25 @@ type ConversationInsight = {
   type: "Finding" | "Friction" | "Opportunity";
   title: string;
   detail: string;
+  confidence: string;
+  evidence?: string;
+  recommendation?: string;
+};
+type ConversationInsightSignal = {
+  label: string;
+  value: string;
+  detail: string;
+};
+type ConversationInsightScore = {
+  value: number;
+  label: string;
+  tone: "strong" | "watch" | "risk";
+};
+type ConversationInsightReport = {
+  summary: string;
+  score: ConversationInsightScore;
+  signals: ConversationInsightSignal[];
+  insights: ConversationInsight[];
 };
 type AdminUser = {
   id: string;
@@ -1205,104 +1252,253 @@ const normalizeTranscriptText = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-const buildConversationInsights = (conversation?: Conversation | null): ConversationInsight[] => {
-  if (!conversation) return [];
+const countMatches = (text: string, patterns: RegExp[]) =>
+  patterns.reduce((sum, pattern) => sum + (text.match(pattern)?.length || 0), 0);
+const countWords = (message: string) => normalizeTranscriptText(message).split(" ").filter(Boolean).length;
+const clipEvidence = (message = "") => {
+  const cleanMessage = message.replace(/\s+/g, " ").trim();
+  if (cleanMessage.length <= 150) return cleanMessage;
+  return `${cleanMessage.slice(0, 147).trim()}...`;
+};
+const buildConversationInsightReport = (conversation?: Conversation | null): ConversationInsightReport => {
+  const emptyReport: ConversationInsightReport = {
+    summary: "Open a transcript to generate an AI-style brief with signals, evidence and next actions.",
+    score: { value: 0, label: "No data", tone: "risk" },
+    signals: [],
+    insights: []
+  };
+  if (!conversation) return emptyReport;
 
   const transcript = conversation.transcript || [];
   if (!transcript.length) {
-    return [
-      {
-        id: `${conversation.id}-empty`,
-        type: "Finding",
-        title: "No transcript content",
-        detail: "This conversation has no transcript rows loaded yet."
-      }
-    ];
+    return {
+      summary: "This conversation does not have transcript rows loaded yet, so the AI brief cannot infer intent, friction or coaching actions.",
+      score: { value: 0, label: "Missing transcript", tone: "risk" },
+      signals: [
+        { label: "Transcript", value: "0 rows", detail: "No utterances available to analyze." },
+        { label: "Evidence", value: "None", detail: "Load the transcript before reviewing quality." },
+        { label: "Next step", value: "Retry", detail: "Refresh the conversation source or check ingestion." }
+      ],
+      insights: [
+        {
+          id: `${conversation.id}-empty`,
+          type: "Friction",
+          title: "No transcript content",
+          detail: "This conversation has no transcript rows loaded yet.",
+          confidence: "High confidence",
+          recommendation: "Verify the ingestion job or conversation provider before making coaching decisions."
+        }
+      ]
+    };
   }
 
-  const piguiTurns = transcript.filter((row) => row.speaker === "Pigui").length;
+  const piguiRows = transcript.filter((row) => row.speaker === "Pigui");
+  const clientRows = transcript.filter((row) => row.speaker !== "Pigui");
+  const piguiTurns = piguiRows.length;
   const clientTurns = transcript.length - piguiTurns;
-  const clientMessages = transcript.filter((row) => row.speaker !== "Pigui").map((row) => row.message);
-  const piguiMessages = transcript.filter((row) => row.speaker === "Pigui").map((row) => row.message);
+  const clientMessages = clientRows.map((row) => row.message);
+  const piguiMessages = piguiRows.map((row) => row.message);
   const allText = normalizeTranscriptText(transcript.map((row) => row.message).join(" "));
+  const piguiText = normalizeTranscriptText(piguiMessages.join(" "));
 
   const themeRules = [
-    { keywords: ["price", "cost", "money", "payment", "fee", "discount"], label: "pricing" },
-    { keywords: ["problem", "issue", "error", "bug", "fail", "not working", "doesn't", "doesnt"], label: "friction" },
-    { keywords: ["help", "how", "explain", "clarify", "understand"], label: "clarity" },
-    { keywords: ["buy", "purchase", "order", "redeem", "claim"], label: "conversion" },
-    { keywords: ["business", "company", "branch", "store", "customer"], label: "business context" }
+    { label: "Pricing sensitivity", patterns: [/\b(price|cost|money|payment|fee|discount|expensive|cheap|precio|costo|pago|descuento|caro)\b/g] },
+    { label: "Product friction", patterns: [/\b(problem|issue|error|bug|fail|failed|stuck|confusing|confused|problema|error|falla|atorado|confuso)\b/g] },
+    { label: "Clarity need", patterns: [/\b(help|how|explain|clarify|understand|guide|ayuda|como|explica|aclara|entiendo|guia)\b/g] },
+    { label: "Conversion intent", patterns: [/\b(buy|purchase|order|redeem|claim|subscribe|comprar|pedido|canjear|reclamar|suscribir)\b/g] },
+    { label: "Business context", patterns: [/\b(business|company|branch|store|customer|team|negocio|empresa|sucursal|tienda|cliente|equipo)\b/g] }
   ];
-
   const topTheme = themeRules
-    .map((rule) => ({
-      label: rule.label,
-      score: rule.keywords.reduce((sum, keyword) => sum + (allText.includes(keyword) ? 1 : 0), 0)
-    }))
+    .map((rule) => ({ label: rule.label, score: countMatches(allText, rule.patterns) }))
     .sort((left, right) => right.score - left.score)[0];
-  const longestClientMessage = [...clientMessages].sort((left, right) => right.length - left.length)[0] || "";
-  const clientQuestionCount = clientMessages.filter((message) => message.includes("?")).length;
-  const frictionSignals = transcript.filter((row) =>
-    /problem|issue|error|bug|confus|stuck|doesn'?t|no entiendo|not clear|frustrat/i.test(row.message)
-  ).length;
+  const longestClientRow = [...clientRows].sort((left, right) => right.message.length - left.message.length)[0];
+  const longestPiguiRow = [...piguiRows].sort((left, right) => right.message.length - left.message.length)[0];
+  const avgPiguiWords = piguiMessages.length
+    ? Math.round(piguiMessages.reduce((sum, message) => sum + countWords(message), 0) / piguiMessages.length)
+    : 0;
+  const avgClientWords = clientMessages.length
+    ? Math.round(clientMessages.reduce((sum, message) => sum + countWords(message), 0) / clientMessages.length)
+    : 0;
+  const clientQuestionCount = clientMessages.filter((message) => /[?¿]/.test(message)).length;
+  const piguiQuestionCount = piguiMessages.filter((message) => /[?¿]/.test(message)).length;
+  const frictionRows = transcript.filter((row) =>
+    /problem|issue|error|bug|confus|stuck|doesn'?t|not clear|frustrat|problema|falla|no entiendo|confuso|atorado|molest/i.test(row.message)
+  );
+  const weakClientRows = clientRows.filter((row) => {
+    const rowIndex = transcript.indexOf(row);
+    const previousPiguiMessage = rowIndex > 0 ? transcript[rowIndex - 1]?.message || "" : "";
+    const normalizedMessage = normalizeTranscriptText(row.message);
+    const qualitativePrompt = /describe|responsibility|control|clarity|represent|possible|heaviest|variable|condition|stage of life|what part|what feels|which variable/i.test(previousPiguiMessage);
+    const vagueAnswer = /^(uh|um|ok|okay|average ticket|sales more money)$/i.test(normalizedMessage) || /^(uh|um)\b/i.test(row.message.trim());
+    const numericOnlyAnswer = /^[\d\s,.$-]+(us dollars|dollars|bucks)?$/i.test(row.message.trim());
+    return vagueAnswer || (qualitativePrompt && numericOnlyAnswer) || (qualitativePrompt && countWords(row.message) <= 2);
+  });
+  const positiveSignals = countMatches(allText, [/\b(clear|helpful|thanks|great|good|easy|claro|gracias|excelente|bueno|facil)\b/g]);
+  const actionSignals = countMatches(piguiText, [/\b(recommend|suggest|follow up|share|send|try|setup|recomiendo|sugiero|envio|intenta|configura)\b/g]);
+  const empathySignals = countMatches(piguiText, [/\b(thanks|thank you|understand|helpful|perfect|happy to|gracias|entiendo|perfecto|claro|con gusto)\b/g]);
+  const balanceGap = Math.abs(clientTurns - piguiTurns);
+  const verbosityRisk = avgPiguiWords > Math.max(26, avgClientWords * 1.8);
+  const lowQuestionRisk = piguiQuestionCount < Math.max(1, Math.floor(clientTurns / 4));
+  const scoreValue = Math.max(
+    35,
+    Math.min(
+      96,
+      82
+        - frictionRows.length * 8
+        - weakClientRows.length * 5
+        - (verbosityRisk ? 8 : 0)
+        - (lowQuestionRisk ? 6 : 0)
+        - (balanceGap > 3 ? 5 : 0)
+        + Math.min(8, positiveSignals * 2)
+        + Math.min(6, actionSignals * 2)
+    )
+  );
+  const score: ConversationInsightScore = {
+    value: scoreValue,
+    label: scoreValue >= 82 ? "Strong" : scoreValue >= 65 ? "Watch" : "Needs attention",
+    tone: scoreValue >= 82 ? "strong" : scoreValue >= 65 ? "watch" : "risk"
+  };
+  const primaryIntent = topTheme?.score ? topTheme.label : clientQuestionCount ? "Exploratory question" : "General baseline discovery";
+  const mainEvidence = frictionRows[0] || longestClientRow || transcript[0];
 
-  const insights: ConversationInsight[] = [
+  const signals: ConversationInsightSignal[] = [
     {
-      id: `${conversation.id}-balance`,
-      type: "Finding",
-      title: "Conversation balance",
-      detail: `This transcript contains ${clientTurns} client turns and ${piguiTurns} Pigui turns.`
+      label: "Client intent",
+      value: primaryIntent,
+      detail: topTheme?.score ? `${topTheme.score} matching signal${topTheme.score === 1 ? "" : "s"} in the transcript.` : "No dominant keyword cluster detected."
     },
     {
-      id: `${conversation.id}-theme`,
-      type: "Finding",
-      title: "Main theme",
-      detail: topTheme?.score ? `The strongest signal is around ${topTheme.label}.` : "No dominant theme was detected from the transcript text."
+      label: "Friction",
+      value: frictionRows.length || weakClientRows.length ? `${frictionRows.length + weakClientRows.length} signal${frictionRows.length + weakClientRows.length === 1 ? "" : "s"}` : "Low",
+      detail: frictionRows.length
+        ? "Review the cited evidence before closing the conversation."
+        : weakClientRows.length
+          ? "Short, vague or mismatched client answers need review."
+          : "No explicit confusion, error or weak-answer pattern detected."
+    },
+    {
+      label: "Agent style",
+      value: verbosityRisk ? "Verbose" : "Focused",
+      detail: `Pigui averages ${avgPiguiWords} words per turn vs. ${avgClientWords} from the client.`
+    },
+    {
+      label: "Next-step clarity",
+      value: actionSignals ? "Present" : "Weak",
+      detail: actionSignals ? `${actionSignals} action-oriented cue${actionSignals === 1 ? "" : "s"} detected.` : "The transcript could end with a clearer recommendation."
     }
   ];
 
-  if (clientQuestionCount > 0 || frictionSignals > 0) {
+  const insights: ConversationInsight[] = [
+    {
+      id: `${conversation.id}-intent`,
+      type: "Finding",
+      title: `Primary intent: ${primaryIntent}`,
+      detail: topTheme?.score
+        ? `The strongest cluster points to ${primaryIntent.toLowerCase()}, so this conversation should be reviewed through that lens instead of as a generic transcript.`
+        : "The conversation does not expose a strong theme yet, which suggests Pigui may need one sharper discovery question.",
+      confidence: topTheme?.score && topTheme.score >= 2 ? "High confidence" : "Medium confidence",
+      evidence: mainEvidence ? `${mainEvidence.speaker}: "${clipEvidence(mainEvidence.message)}"` : undefined,
+      recommendation: topTheme?.score
+        ? `Tag this conversation as ${primaryIntent.toLowerCase()} and compare it against similar transcripts for repeated product or sales signals.`
+        : "Add one follow-up prompt that asks the client to name the exact goal or blocker."
+    },
+    {
+      id: `${conversation.id}-quality`,
+      type: "Finding",
+      title: "Conversation quality score",
+      detail: `Estimated at ${score.value}/100 from friction language, response length, question cadence, empathy and next-step cues.`,
+      confidence: "Medium confidence",
+      evidence: `${clientTurns} client turns, ${piguiTurns} Pigui turns, ${piguiQuestionCount} Pigui questions.`,
+      recommendation: score.tone === "strong"
+        ? "Use this as a reference transcript for the agent's current flow."
+        : "Review the weaker signals below and tune the prompt before scaling this pattern."
+    }
+  ];
+
+  if (frictionRows.length > 0 || weakClientRows.length > 0 || clientQuestionCount > piguiQuestionCount) {
+    const frictionEvidence = frictionRows[0] || weakClientRows[0];
     insights.push({
       id: `${conversation.id}-friction`,
       type: "Friction",
-      title: "Potential friction",
-      detail: frictionSignals > 0
-        ? `The transcript includes ${frictionSignals} signal${frictionSignals === 1 ? "" : "s"} of confusion or friction.`
-        : `The client asked ${clientQuestionCount} direct question${clientQuestionCount === 1 ? "" : "s"}, which may need a clearer handoff or explanation.`
+      title: frictionRows.length ? "Friction needs follow-up" : weakClientRows.length ? "Weak answer quality detected" : "Client is asking more than the agent resolves",
+      detail: frictionRows.length
+        ? `${frictionRows.length} utterance${frictionRows.length === 1 ? "" : "s"} include confusion, error or frustration language.`
+        : weakClientRows.length
+          ? `${weakClientRows.length} client answer${weakClientRows.length === 1 ? "" : "s"} look vague, too short or misaligned with the question, which can make the transcript less useful for personalization.`
+          : `The client asked ${clientQuestionCount} direct question${clientQuestionCount === 1 ? "" : "s"} while Pigui asked ${piguiQuestionCount}, which may mean the agent is answering without enough guided discovery.`,
+      confidence: frictionRows.length || weakClientRows.length >= 2 ? "High confidence" : "Medium confidence",
+      evidence: frictionEvidence ? `${frictionEvidence.speaker}: "${clipEvidence(frictionEvidence.message)}"` : `${clientQuestionCount} client questions detected.`,
+      recommendation: frictionRows.length
+        ? "Create a follow-up task that acknowledges the blocker and asks whether it was resolved."
+        : weakClientRows.length
+          ? "Add a repair prompt: when the client gives a vague answer, ask for one concrete example before moving to the next baseline question."
+          : "Tune the agent to answer briefly, then ask one clarifying question before moving on."
     });
   } else {
     insights.push({
       id: `${conversation.id}-friction`,
       type: "Opportunity",
       title: "Low-friction flow",
-      detail: "No obvious friction keywords were detected in this conversation."
+      detail: "No explicit confusion, error, frustration or weak-answer pattern was detected.",
+      confidence: "Medium confidence",
+      evidence: positiveSignals ? `${positiveSignals} positive or cooperative cue${positiveSignals === 1 ? "" : "s"} detected.` : undefined,
+      recommendation: "Preserve this flow, but still add a final confirmation question to catch hidden objections."
     });
   }
 
-  if (longestClientMessage.length >= 120) {
+  if (verbosityRisk) {
+    insights.push({
+      id: `${conversation.id}-coaching`,
+      type: "Opportunity",
+      title: "Tighten Pigui's responses",
+      detail: `Pigui is averaging ${avgPiguiWords} words per turn, which is high relative to the client's ${avgClientWords}.`,
+      confidence: "High confidence",
+      evidence: longestPiguiRow ? `Pigui: "${clipEvidence(longestPiguiRow.message)}"` : undefined,
+      recommendation: "Rewrite the agent prompt to use one short answer, one reason, and one next question per turn."
+    });
+  } else if (longestClientRow && longestClientRow.message.length >= 120) {
     insights.push({
       id: `${conversation.id}-depth`,
       type: "Opportunity",
       title: "Deep customer context",
-      detail: `The longest client response is ${longestClientMessage.length} characters, which suggests enough detail to extract richer follow-up actions.`
-    });
-  } else if (piguiMessages.some((message) => message.length > 140)) {
-    insights.push({
-      id: `${conversation.id}-depth`,
-      type: "Opportunity",
-      title: "High agent verbosity",
-      detail: "Some Pigui responses are long, so there may be room to tighten the flow and shorten the path to the next question."
+      detail: "The client gave a long answer with enough context to extract richer personalization or product feedback.",
+      confidence: "High confidence",
+      evidence: `${longestClientRow.speaker}: "${clipEvidence(longestClientRow.message)}"`,
+      recommendation: "Convert this response into structured tags: goal, blocker, product area and recommended next action."
     });
   } else {
     insights.push({
       id: `${conversation.id}-depth`,
       type: "Opportunity",
       title: "Move to action",
-      detail: "This conversation appears concise enough to turn into a next-step recommendation or follow-up."
+      detail: actionSignals
+        ? "The conversation is concise and already contains action language."
+        : "The conversation is concise, but the next action could be more explicit.",
+      confidence: "Medium confidence",
+      evidence: actionSignals ? `${actionSignals} action cue${actionSignals === 1 ? "" : "s"} detected in Pigui turns.` : undefined,
+      recommendation: actionSignals ? "Send the recommended next step to the client record." : "Add a closing step that names the next action and owner."
     });
   }
 
-  return insights;
+  if (empathySignals === 0) {
+    insights.push({
+      id: `${conversation.id}-empathy`,
+      type: "Opportunity",
+      title: "Add more acknowledgement",
+      detail: "Pigui did not use clear acknowledgement or empathy language in the detected turns.",
+      confidence: "Medium confidence",
+      recommendation: "Start one response with a brief acknowledgement before asking the next question."
+    });
+  }
+
+  return {
+    summary: `${conversation.client} spoke with ${conversation.agent}. The strongest signal is ${primaryIntent.toLowerCase()}, quality is ${score.label.toLowerCase()}, and the best next move is ${
+      frictionRows.length || weakClientRows.length ? "follow up on friction evidence" : actionSignals ? "capture the next action in the client record" : "make the close more actionable"
+    }.`,
+    score,
+    signals,
+    insights
+  };
 };
 const loadAdminUsers = async () => {
   if (USE_DEMO_DATA && !authToken.value) {
@@ -1451,7 +1647,11 @@ const loadProductionData = async () => {
 
 const selectedClient = computed(() => clients.value.find((client) => client.id === selectedClientId.value));
 const selectedConversation = computed(() => conversations.value.find((conversation) => conversation.id === selectedConversationId.value));
-const selectedConversationInsights = computed(() => buildConversationInsights(selectedConversation.value));
+const selectedConversationInsightReport = computed(() => buildConversationInsightReport(selectedConversation.value));
+const selectedConversationInsights = computed(() => selectedConversationInsightReport.value.insights);
+const selectedConversationInsightSummary = computed(() => selectedConversationInsightReport.value.summary);
+const selectedConversationInsightScore = computed(() => selectedConversationInsightReport.value.score);
+const selectedConversationInsightSignals = computed(() => selectedConversationInsightReport.value.signals);
 const selectedClientConversations = computed(() => conversations.value.filter((conversation) => conversation.clientId === selectedClientId.value));
 const selectedAgent = computed(() => activeAgentCatalog.value.find((agent) => agent.id === selectedAgentId.value));
 const selectedAgentResponseCount = computed(() => selectedAgentResponses.value.length);
