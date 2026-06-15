@@ -613,22 +613,26 @@ h3 {
 }
 
 .journey-grid--dashboard {
-  gap: 12px;
+  gap: 14px;
+  grid-template-columns: 1fr;
 }
 
 .journey-grid__row {
-  align-items: center;
-  display: flex;
-  gap: 14px;
+  align-items: stretch;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) 28px minmax(0, 1fr);
 }
 
 .journey-grid__arrow {
+  align-items: center;
   color: #98a7c0;
-  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
   font-size: 26px;
   font-weight: 500;
   line-height: 1;
-  margin-top: -4px;
+  margin-top: 0;
 }
 
 .journey-step {
@@ -647,22 +651,13 @@ h3 {
 .journey-step--dashboard {
   background: #ffffff;
   grid-template-columns: 32px minmax(0, 1fr);
-  min-height: 66px;
-  padding: 12px 14px;
-  width: min(100%, 100%);
+  min-height: 100px;
+  padding: 14px;
+  width: 100%;
 }
 
 .journey-step--dashboard::after {
   display: none;
-}
-
-.journey-step:not(:nth-child(3n))::after {
-  color: #9db0c9;
-  content: "→";
-  font-weight: 900;
-  position: absolute;
-  right: -13px;
-  top: 50%;
 }
 
 .journey-step__number {
@@ -1477,7 +1472,7 @@ th {
 
   .journey-grid__row {
     align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .journey-grid__arrow {

@@ -1781,7 +1781,7 @@ const summaryMetrics = computed(() => [
   }
 ]);
 const journeyFlowRows = computed(() => {
-  const journeyAgents = agentCatalog.map((agent) => {
+  const journeyAgents = agentCatalog.slice(0, 9).map((agent) => {
     const agentConversations = conversations.value.filter((conversation) => conversation.agent === agent.name);
     return {
       ...agent,
