@@ -1761,7 +1761,15 @@ const summaryMetrics = computed(() => [
   }
 ]);
 const journeyFlowRows = computed(() => {
-  const journeyAgents = agents.value.slice(0, 9);
+  const journeyAgents = agentCatalog.map((agent) => {
+    const agentConversations = conversations.value.filter((conversation) => conversation.agent === agent.name);
+    return {
+      ...agent,
+      conversations: agentConversations.length,
+      clientsWithActivity: new Set(agentConversations.map((conversation) => conversation.clientId)).size,
+      lastActivity: agentConversations[0]?.date || agent.lastActivity || "No activity"
+    };
+  });
   return Array.from({ length: 3 }, (_unused, rowIndex) => ({
     index: rowIndex + 1,
     items: journeyAgents.slice(rowIndex * 3, rowIndex * 3 + 3)
